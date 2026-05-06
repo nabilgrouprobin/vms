@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Env and secrets
+.env
+.env.local
+.env.*.local
+
+# Builds
+backend/dist/
+frontend/.next/
+frontend/out/
+
+# Logs and tooling
+*.log
+.DS_Store

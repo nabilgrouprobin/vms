@@ -1,0 +1,80 @@
+"use client";
+
+import { List } from "react-window";
+
+import { cn } from "@/lib/utils";
+
+export type OptionRow = { id: string; label: string; description?: string };
+
+type RowCtx = {
+  items: OptionRow[];
+  onPick: (id: string) => void;
+  selectedId: string | null;
+};
+
+function OptionRow({
+  ariaAttributes,
+  index,
+  style,
+  items,
+  onPick,
+  selectedId
+}: {
+  ariaAttributes: {
+    "aria-posinset": number;
+    "aria-setsize": number;
+    role: "listitem";
+  };
+  index: number;
+  style: React.CSSProperties;
+} & RowCtx) {
+  const item = items[index];
+  if (!item) return null;
+  return (
+    <div {...ariaAttributes} style={style} className="box-border px-0">
+      <button
+        type="button"
+        className={cn(
+          "flex h-full w-full flex-col items-start justify-center border-b border-border px-3 text-left text-sm hover:bg-accent",
+          selectedId === item.id && "bg-accent"
+        )}
+        onClick={() => onPick(item.id)}
+      >
+        <span className="font-medium leading-tight">{item.label}</span>
+        {item.description ? (
+          <span className="text-xs text-muted-foreground leading-tight">{item.description}</span>
+        ) : null}
+      </button>
+    </div>
+  );
+}
+
+export function VirtualOptionPicker({
+  items,
+  onPick,
+  selectedId,
+  height = 240,
+  emptyHint
+}: {
+  items: OptionRow[];
+  onPick: (id: string) => void;
+  selectedId: string | null;
+  height?: number;
+  emptyHint?: string;
+}) {
+  if (items.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">{emptyHint ?? "No matches"}</p>
+    );
+  }
+
+  return (
+    <List
+      style={{ height, width: "100%" }}
+      rowHeight={52}
+      rowCount={items.length}
+      rowProps={{ items, onPick, selectedId }}
+      rowComponent={OptionRow}
+    />
+  );
+}

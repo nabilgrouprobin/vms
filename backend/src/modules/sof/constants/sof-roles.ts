@@ -1,0 +1,43 @@
+import { AppRole } from "@prisma/client";
+
+/** Read-only SOF / vessel-call operational views */
+export const SOF_VIEWER_ROLES: AppRole[] = [
+  AppRole.SUPER_ADMIN,
+  AppRole.SYSTEM_ADMIN,
+  AppRole.HEAD_OFFICE_LC,
+  AppRole.COMMERCIAL_ADMIN,
+  AppRole.APPROVAL_ADMIN,
+  AppRole.INTEGRATION_ADMIN,
+  AppRole.OPERATIONS_MANAGER,
+  AppRole.MOTHER_VESSEL_ADMIN,
+  AppRole.MANAGEMENT_VIEWER,
+  AppRole.AUDITOR,
+  AppRole.REPORT_VIEWER,
+  AppRole.DOCUMENT_CONTROLLER,
+  AppRole.COST_ACCOUNTANT,
+  AppRole.FINANCE_APPROVER,
+  AppRole.LIGHTER_ASSIGNMENT_OFFICER,
+  AppRole.CARRIER_COORDINATOR,
+  AppRole.PORT_ADMIN,
+  AppRole.SHIPPING_AGENT_USER,
+  AppRole.CNF_AGENT,
+  AppRole.STEVEDORE_COORDINATOR,
+  AppRole.GHAT_OPERATOR,
+  AppRole.QUALITY_CONTROLLER,
+  AppRole.WEIGHMENT_OFFICER,
+  AppRole.TRUCK_DISPATCH_OFFICER,
+  AppRole.SECURITY_GATE,
+  AppRole.WAREHOUSE_OPERATOR,
+  AppRole.WAREHOUSE_RECEIVER,
+  AppRole.INVENTORY_CONTROLLER,
+  AppRole.SALES_COORDINATOR,
+  AppRole.SURVEYOR
+];
+
+/** Create / update / delete SOF data */
+export const SOF_EDITOR_ROLES: AppRole[] = [
+  AppRole.SUPER_ADMIN,
+  AppRole.SYSTEM_ADMIN,
+  AppRole.OPERATIONS_MANAGER,
+  AppRole.MOTHER_VESSEL_ADMIN
+];
