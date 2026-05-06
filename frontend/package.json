@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npx next dev -p 3001",
-    "dev:turbo": "npx next dev -p 3001 --turbo",
+    "dev": "npx next dev -p 7701",
+    "dev:turbo": "npx next dev -p 7701 --turbo",
     "build": "npx next build",
-    "start": "npx next start",
+    "start": "npx next start -p 7701",
     "lint": "npx next lint",
     "test": "vitest run"
   },

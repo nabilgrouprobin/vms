@@ -7,6 +7,8 @@ import { PrismaService } from "./prisma/prisma.service";
 const defaultBrowserOrigins = [
   "http://localhost:3001",
   "http://127.0.0.1:3001",
+  "http://localhost:7701",
+  "http://127.0.0.1:7701",
   "http://localhost:3000",
   "http://127.0.0.1:3000"
 ];
