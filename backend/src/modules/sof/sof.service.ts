@@ -195,7 +195,7 @@ export class SofService {
 
     try {
       return await this.sofRepository.deleteMotherVesselSof(id);
-    } catch (error) {
+    } catch (error: any) {
       this.throwPrismaConflict(
         error,
         "SOF cannot be deleted while related records still reference it"
@@ -351,7 +351,7 @@ export class SofService {
 
     try {
       return await this.sofRepository.deleteLighterVesselSof(id);
-    } catch (error) {
+    } catch (error: any) {
       this.throwPrismaConflict(
         error,
         "SOF cannot be deleted while related records still reference it"
@@ -773,10 +773,8 @@ export class SofService {
   }
 
   private throwPrismaConflict(error: unknown, message: string): void {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      (error.code === "P2002" || error.code === "P2003")
-    ) {
+    const knownError = error as Prisma.PrismaClientKnownRequestError | null;
+    if (knownError && (knownError.code === "P2002" || knownError.code === "P2003")) {
       throw new ConflictException(message);
     }
   }

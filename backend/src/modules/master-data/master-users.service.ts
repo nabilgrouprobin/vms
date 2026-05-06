@@ -300,7 +300,7 @@ export class MasterUsersService {
           location: { select: { id: true, code: true, name: true, type: true } }
         }
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new ConflictException("This role is already assigned for this user and location");
       }

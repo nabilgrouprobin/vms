@@ -134,7 +134,7 @@ export class MasterOrganizationsService {
         },
         select: orgSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new ConflictException("Organization code or unique field already exists");
       }
@@ -180,7 +180,7 @@ export class MasterOrganizationsService {
         data,
         select: orgSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new ConflictException("Organization code or unique field already exists");
       }

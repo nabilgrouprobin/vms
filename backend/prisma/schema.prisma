@@ -2,8 +2,8 @@
 
 generator client {
   provider = "prisma-client-js"
-  // npm workspaces hoist `@prisma/client` to repo root; client must live next to that package.
-  output   = "../../node_modules/@prisma/client/.prisma/client"
+  // Generate in the default runtime resolution location for @prisma/client.
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {

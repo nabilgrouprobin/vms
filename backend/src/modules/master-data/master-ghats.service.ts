@@ -129,7 +129,7 @@ export class MasterGhatsService {
         select: ghatSelect
       });
       return this.mapGhat(row);
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException("Another ghat already uses this code.");
       }
@@ -212,7 +212,7 @@ export class MasterGhatsService {
         select: ghatSelect
       });
       return this.mapGhat(row);
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException("Another ghat already uses this code.");
       }

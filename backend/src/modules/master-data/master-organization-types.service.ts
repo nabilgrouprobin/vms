@@ -98,7 +98,7 @@ export class MasterOrganizationTypesService {
         },
         select: rowSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new ConflictException("Could not allocate a unique organization type code.");
       }

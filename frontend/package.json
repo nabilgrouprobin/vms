@@ -4,10 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "npx next dev -p 7701",
-    "dev:turbo": "npx next dev -p 7701 --turbo",
     "build": "npx next build",
     "start": "npx next start -p 7701",
-    "lint": "npx next lint",
     "test": "vitest run"
   },
   "dependencies": {

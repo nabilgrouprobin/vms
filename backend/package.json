@@ -6,18 +6,8 @@
   "scripts": {
     "build": "nest build",
     "test": "tsx --test \"src/**/*.spec.ts\"",
-    "start": "nest start",
-    "predev": "prisma generate && node ../scripts/fix-prisma-client-default.cjs",
     "dev": "nest start --watch",
-    "prod": "node dist/main.js",
-    "pm2:start": "pm2 start ecosystem.config.cjs",
-    "pm2:reload": "pm2 reload ecosystem.config.cjs",
-    "prisma:generate": "prisma generate",
-    "prisma:validate": "prisma validate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio",
-    "seed": "ts-node prisma/seed.ts"
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.9",

@@ -110,7 +110,7 @@ export class MasterLocationsService {
         },
         select: locationSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException(
           "Another location already uses this code for the same type."
@@ -173,7 +173,7 @@ export class MasterLocationsService {
         data,
         select: locationSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException(
           "Another location already uses this code for the same type."

@@ -156,7 +156,7 @@ export class MasterVesselsService {
         }
       });
       return this.mapVessel(kind, row as VesselListRow);
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException(
           "Another vessel already uses this name or IMO number."
@@ -225,7 +225,7 @@ export class MasterVesselsService {
         }
       });
       return this.mapVessel(kind, row as VesselListRow);
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException(
           "Another vessel already uses this name or IMO number."

@@ -91,7 +91,7 @@ export class MasterProductsService {
         },
         select: productSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException("Another product already uses this code.");
       }
@@ -141,7 +141,7 @@ export class MasterProductsService {
         data,
         select: productSelect
       });
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException("Another product already uses this code.");
       }
