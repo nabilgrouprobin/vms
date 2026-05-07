@@ -51,13 +51,28 @@ function resolvePort() {
 
 const mode = process.argv[2] === "start" ? "start" : "dev";
 const port = resolvePort();
+const host = process.env.HOST || "0.0.0.0";
 
 const nextBin = require.resolve("next/dist/bin/next");
-const child = spawn(process.execPath, [nextBin, mode, "-p", String(port)], {
+const args = [nextBin, mode, "-H", host, "-p", String(port)];
+
+if (mode === "dev") {
+  const certPath = path.join(__dirname, "..", "cert.pem");
+  const keyPath = path.join(__dirname, "..", "key.pem");
+
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    args.push("--experimental-https-cert", certPath, "--experimental-https-key", keyPath);
+  } else {
+    args.push("--experimental-https");
+  }
+}
+
+const child = spawn(process.execPath, args, {
   stdio: "inherit",
   env: {
     ...process.env,
-    PORT: String(port)
+    PORT: String(port),
+    HOST: String(host)
   }
 });
 

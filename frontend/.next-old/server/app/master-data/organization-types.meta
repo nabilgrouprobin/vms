@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/master-data/layout,_N_T_/master-data/organization-types/layout,_N_T_/master-data/organization-types/page,_N_T_/master-data/organization-types"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/master-data/organization-types/__PAGE__",
+    "/master-data/organization-types",
+    "/master-data",
+    "/_index",
+    "/_head"
+  ]
+}

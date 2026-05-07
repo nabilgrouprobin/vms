@@ -1,0 +1,237 @@
+import { ListVesselCallsQueryDto } from "./dto/list-vessel-calls.query.dto";
+import { PatchVesselCallDto } from "./dto/patch-vessel-call.dto";
+import { VesselCallsService } from "./vessel-calls.service";
+export declare class VesselCallsController {
+    private readonly vesselCallsService;
+    constructor(vesselCallsService: VesselCallsService);
+    list(query: ListVesselCallsQueryDto): Promise<{
+        data: {
+            vessel: {
+                id: string;
+                name: string;
+                imoNo: string | null;
+                flag: string | null;
+                isMotherVessel: boolean;
+                isLighter: boolean;
+            };
+            statementOfFacts: {
+                id: string;
+                status: import(".prisma/client").$Enums.SOFStatus;
+                sofNo: string;
+                scope: import(".prisma/client").$Enums.SOFScope;
+            } | null;
+            id: string;
+            _count: {
+                lighterAssignments: number;
+                lighterTrips: number;
+            };
+            status: import(".prisma/client").$Enums.MotherVesselStatus;
+            callNo: string;
+            eta: Date | null;
+            ata: Date | null;
+            cargoNameSnapshot: string | null;
+            currentAnchorage: string | null;
+            totalDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+            arrivalLocation: {
+                id: string;
+                name: string;
+                type: import(".prisma/client").$Enums.LocationType;
+            } | null;
+        }[];
+        nextCursor: string | null;
+        limit: number;
+    }>;
+    getOne(id: string): Promise<{
+        vessel: {
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            name: string;
+            imoNo: string | null;
+            vesselType: string | null;
+            flag: string | null;
+            deadweightTon: import("@prisma/client-runtime-utils").Decimal | null;
+            maxDraftMeters: import("@prisma/client-runtime-utils").Decimal | null;
+            lengthOverallM: import("@prisma/client-runtime-utils").Decimal | null;
+            beamM: import("@prisma/client-runtime-utils").Decimal | null;
+            yearBuilt: number | null;
+            isMotherVessel: boolean;
+            isLighter: boolean;
+        };
+        statementOfFacts: ({
+            _count: {
+                events: number;
+                hourlyStatuses: number;
+            };
+        } & {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            status: import(".prisma/client").$Enums.SOFStatus;
+            remarks: string | null;
+            approvedAt: Date | null;
+            approvedBy: string | null;
+            sofNo: string;
+            scope: import(".prisma/client").$Enums.SOFScope;
+            vesselCallId: string | null;
+            lighterTripId: string | null;
+            startedAt: Date | null;
+            completedAt: Date | null;
+            laytimeAllowedHours: import("@prisma/client-runtime-utils").Decimal | null;
+            laytimeUsedHours: import("@prisma/client-runtime-utils").Decimal | null;
+            laytimeExcludedHours: import("@prisma/client-runtime-utils").Decimal | null;
+            laytimeBalanceHours: import("@prisma/client-runtime-utils").Decimal | null;
+            laytimeCommenceAt: Date | null;
+            demurrageAmount: import("@prisma/client-runtime-utils").Decimal | null;
+            dispatchAmount: import("@prisma/client-runtime-utils").Decimal | null;
+            netAmount: import("@prisma/client-runtime-utils").Decimal | null;
+            verifiedBy: string | null;
+            verifiedAt: Date | null;
+        }) | null;
+        arrivalLocation: {
+            id: string;
+            isActive: boolean;
+            deletedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+            name: string;
+            code: string;
+            address: string | null;
+            type: import(".prisma/client").$Enums.LocationType;
+            district: string | null;
+            division: string | null;
+            country: string;
+            postalCode: string | null;
+        } | null;
+        shippingAgent: {
+            id: string;
+            name: string;
+            code: string;
+        } | null;
+        stevedore: {
+            id: string;
+            name: string;
+            code: string;
+        } | null;
+        cnf: {
+            id: string;
+            name: string;
+            code: string;
+        } | null;
+        lighterTrips: {
+            statementOfFacts: {
+                id: string;
+                status: import(".prisma/client").$Enums.SOFStatus;
+                sofNo: string;
+            } | null;
+            id: string;
+            status: import(".prisma/client").$Enums.LighterTripStatus;
+            tripNo: string;
+            assignedAt: Date;
+            lighterVessel: {
+                id: string;
+                name: string;
+            };
+        }[];
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        status: import(".prisma/client").$Enums.MotherVesselStatus;
+        laytimeCommenceAt: Date | null;
+        callNo: string;
+        vesselId: string;
+        importContractId: string | null;
+        arrivalLocationId: string | null;
+        shippingAgentId: string | null;
+        stevedoreId: string | null;
+        cnfId: string | null;
+        eta: Date | null;
+        etd: Date | null;
+        ata: Date | null;
+        atd: Date | null;
+        anchorDroppedAt: Date | null;
+        norTenderedAt: Date | null;
+        norAcceptedAt: Date | null;
+        norRejectedAt: Date | null;
+        norRejectionReason: string | null;
+        norNumber: string | null;
+        laytimeTimeZone: string | null;
+        igmDate: Date | null;
+        customsClearanceDate: Date | null;
+        quarantineClearanceDate: Date | null;
+        portAuthorityClearanceDate: Date | null;
+        readyToDischargeAt: Date | null;
+        dischargeStartedAt: Date | null;
+        dischargeCompletedAt: Date | null;
+        anchorUpAt: Date | null;
+        cargoNameSnapshot: string | null;
+        approxTotalWeightTon: import("@prisma/client-runtime-utils").Decimal | null;
+        toleranceMinusPct: import("@prisma/client-runtime-utils").Decimal | null;
+        tolerancePlusPct: import("@prisma/client-runtime-utils").Decimal | null;
+        holdReason: string | null;
+        currentAnchorage: string | null;
+        isAnchored: boolean | null;
+        isAlongside: boolean | null;
+        addedById: string | null;
+        updatedById: string | null;
+        totalStages: number;
+        completedStages: number;
+        lastStageCompletedAt: Date | null;
+        nextStageExpectedAt: Date | null;
+        anchorageDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+        alongsideDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+        totalDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+    }>;
+    patch(id: string, dto: PatchVesselCallDto): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        status: import(".prisma/client").$Enums.MotherVesselStatus;
+        laytimeCommenceAt: Date | null;
+        callNo: string;
+        vesselId: string;
+        importContractId: string | null;
+        arrivalLocationId: string | null;
+        shippingAgentId: string | null;
+        stevedoreId: string | null;
+        cnfId: string | null;
+        eta: Date | null;
+        etd: Date | null;
+        ata: Date | null;
+        atd: Date | null;
+        anchorDroppedAt: Date | null;
+        norTenderedAt: Date | null;
+        norAcceptedAt: Date | null;
+        norRejectedAt: Date | null;
+        norRejectionReason: string | null;
+        norNumber: string | null;
+        laytimeTimeZone: string | null;
+        igmDate: Date | null;
+        customsClearanceDate: Date | null;
+        quarantineClearanceDate: Date | null;
+        portAuthorityClearanceDate: Date | null;
+        readyToDischargeAt: Date | null;
+        dischargeStartedAt: Date | null;
+        dischargeCompletedAt: Date | null;
+        anchorUpAt: Date | null;
+        cargoNameSnapshot: string | null;
+        approxTotalWeightTon: import("@prisma/client-runtime-utils").Decimal | null;
+        toleranceMinusPct: import("@prisma/client-runtime-utils").Decimal | null;
+        tolerancePlusPct: import("@prisma/client-runtime-utils").Decimal | null;
+        holdReason: string | null;
+        currentAnchorage: string | null;
+        isAnchored: boolean | null;
+        isAlongside: boolean | null;
+        addedById: string | null;
+        updatedById: string | null;
+        totalStages: number;
+        completedStages: number;
+        lastStageCompletedAt: Date | null;
+        nextStageExpectedAt: Date | null;
+        anchorageDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+        alongsideDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+        totalDischargeMt: import("@prisma/client-runtime-utils").Decimal | null;
+    }>;
+}

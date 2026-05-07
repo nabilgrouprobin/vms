@@ -1,0 +1,15 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/mother-vessel-reports/layout,_N_T_/mother-vessel-reports/page,_N_T_/mother-vessel-reports"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/mother-vessel-reports/__PAGE__",
+    "/mother-vessel-reports",
+    "/_index",
+    "/_head"
+  ]
+}

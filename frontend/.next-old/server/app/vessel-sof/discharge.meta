@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/vessel-sof/layout,_N_T_/vessel-sof/discharge/layout,_N_T_/vessel-sof/discharge/page,_N_T_/vessel-sof/discharge"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/vessel-sof/discharge/__PAGE__",
+    "/vessel-sof/discharge",
+    "/vessel-sof",
+    "/_index",
+    "/_head"
+  ]
+}

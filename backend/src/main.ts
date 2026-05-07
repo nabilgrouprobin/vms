@@ -10,20 +10,18 @@ async function bootstrap() {
   const originList = process.env.CORS_ORIGINS?.split(",")
     .map((o) => o.trim())
     .filter(Boolean) ?? [];
-
-  if (originList.length === 0) {
-    throw new Error("CORS_ORIGINS must be set in .env with comma-separated origins");
-  }
+  const allowAllCors = originList.includes("*");
 
   app.enableCors({
-    origin: originList,
+    origin: allowAllCors || originList.length === 0 ? true : originList,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "Accept"]
   });
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
-  await app.listen(port);
+  const host = process.env.HOST?.trim() || "0.0.0.0";
+  await app.listen(port, host);
 
   const prisma = app.get(PrismaService);
   let databaseStatus = "connected";
@@ -35,7 +33,7 @@ async function bootstrap() {
     console.error("[VMS] Database connection check failed:", error);
   }
 
-  console.log(`[VMS] Server running on http://localhost:${port}`);
+  console.log(`[VMS] Server running on http://${host}:${port}`);
   console.log(`[VMS] Database is ${databaseStatus}`);
 }
 

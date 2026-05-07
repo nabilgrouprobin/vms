@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/vessel-sof/layout,_N_T_/vessel-sof/events/layout,_N_T_/vessel-sof/events/page,_N_T_/vessel-sof/events"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/vessel-sof/events/__PAGE__",
+    "/vessel-sof/events",
+    "/vessel-sof",
+    "/_index",
+    "/_head"
+  ]
+}

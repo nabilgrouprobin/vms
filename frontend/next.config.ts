@@ -18,6 +18,17 @@ const nextConfig: NextConfig = {
       "@radix-ui/react-label",
       "@radix-ui/react-slot"
     ]
+  },
+  async rewrites() {
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          source: "/api/:path*",
+          destination: "http://localhost:4000/:path*"
+        }
+      ];
+    }
+    return [];
   }
 };
 
