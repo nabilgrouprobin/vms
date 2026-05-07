@@ -1,11 +1,13 @@
 import { clearSession, getAccessToken } from "@/lib/auth-storage";
 
 export function getApiBase(): string {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL;
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.trim();
   if (!apiBase) {
-    throw new Error("NEXT_PUBLIC_API_URL must be set in frontend/.env.local");
+    throw new Error(
+      "NEXT_PUBLIC_API_URL is missing. Set it in Vercel environment variables for production."
+    );
   }
-  return apiBase;
+  return apiBase.replace(/\/+$/, "");
 }
 
 export class ApiError extends Error {

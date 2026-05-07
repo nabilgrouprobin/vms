@@ -112,6 +112,31 @@ cd frontend && npm run dev
 - If PostgreSQL is on another server, replace `localhost` with that DB host IP/domain.
 - Frontend and backend ports are now env-driven.
 
+## Deploy Frontend on Vercel
+
+This repository is a monorepo (`frontend` + `backend`), so Vercel must build the Next.js app from `frontend`.
+
+### 1) Vercel Project Settings
+
+- Framework Preset: `Next.js`
+- Root Directory: `frontend` (or keep root and use `vercel.json` in this repo)
+- Build Command: `npm run build`
+
+### 2) Add Vercel Environment Variables
+
+Set at least:
+
+```env
+NEXT_PUBLIC_API_URL=https://your-backend-public-url
+```
+
+Do not use `localhost` in production env vars.
+
+### 3) Backend Hosting
+
+Current backend is NestJS and should be hosted separately (for example Railway/Render/Fly.io/VM).
+After backend deployment, copy its public URL into `NEXT_PUBLIC_API_URL` in Vercel and redeploy frontend.
+
 ## Change Ports Using .env Only
 
 You do not need to edit source code when changing ports.
