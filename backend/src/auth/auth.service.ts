@@ -8,6 +8,7 @@ import { SignupDto } from "./dto/signup.dto";
 
 export type JwtPayload = {
   sub: string;
+  roles: AppRole[];
 };
 
 @Injectable()
@@ -117,7 +118,7 @@ export class AuthService {
     },
     roles: AppRole[]
   ) {
-    const payload: JwtPayload = { sub: user.id };
+    const payload: JwtPayload = { sub: user.id, roles };
     const accessToken = await this.jwt.signAsync(payload);
 
     void this.prisma.user

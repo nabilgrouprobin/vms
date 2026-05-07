@@ -2,15 +2,11 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@
 import { Reflector } from "@nestjs/core";
 import { AppRole } from "@prisma/client";
 
-import { PrismaService } from "../../prisma/prisma.service";
 import { ROLES_KEY } from "../decorators/roles.decorator";
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly prisma: PrismaService
-  ) {}
+  constructor(private readonly reflector: Reflector) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const required = this.reflector.getAllAndOverride<AppRole[]>(ROLES_KEY, [
@@ -21,22 +17,15 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const req = context.switchToHttp().getRequest<{ user?: { userId: string } }>();
+    const req = context
+      .switchToHttp()
+      .getRequest<{ user?: { userId: string; roles?: AppRole[] } }>();
     const userId = req.user?.userId;
     if (!userId) {
       throw new ForbiddenException("Authentication required");
     }
 
-    const now = new Date();
-    const assignments = await this.prisma.userRoleAssignment.findMany({
-      where: {
-        userId,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
-      },
-      select: { role: true }
-    });
-
-    const roles = new Set(assignments.map((a) => a.role));
+    const roles = new Set(req.user?.roles ?? []);
     if (roles.has(AppRole.SUPER_ADMIN) || roles.has(AppRole.SYSTEM_ADMIN)) {
       return true;
     }

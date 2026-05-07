@@ -459,14 +459,19 @@ export class LighterTripsService {
       }
 
       if (hasCargoUpdates) {
+        const cargoIds = [...new Set(cargoUpdates.map((u) => u.id))];
+        const ownedRows = await tx.lighterTripCargo.findMany({
+          where: { id: { in: cargoIds }, tripId: id },
+          select: { id: true }
+        });
+        const ownedIds = new Set(ownedRows.map((r) => r.id));
+        const missing = cargoIds.find((cargoId) => !ownedIds.has(cargoId));
+        if (missing) {
+          throw new BadRequestException(`Cargo line ${missing} is not on this trip`);
+        }
+
+        const updateOps: Prisma.PrismaPromise<unknown>[] = [];
         for (const u of cargoUpdates) {
-          const owned = await tx.lighterTripCargo.findFirst({
-            where: { id: u.id, tripId: id },
-            select: { id: true }
-          });
-          if (!owned) {
-            throw new BadRequestException(`Cargo line ${u.id} is not on this trip`);
-          }
           const cargoData: Prisma.LighterTripCargoUpdateInput = {};
           if (u.estimatedQtyTon !== undefined) {
             const q = this.parseOptionalMtDecimal(u.estimatedQtyTon, "estimatedQtyTon");
@@ -481,11 +486,16 @@ export class LighterTripsService {
             if (q !== undefined) cargoData.dischargedQtyTon = q;
           }
           if (Object.keys(cargoData).length > 0) {
-            await tx.lighterTripCargo.update({
-              where: { id: u.id },
-              data: cargoData
-            });
+            updateOps.push(
+              tx.lighterTripCargo.update({
+                where: { id: u.id },
+                data: cargoData
+              })
+            );
           }
+        }
+        if (updateOps.length > 0) {
+          await Promise.all(updateOps);
         }
       }
 
@@ -556,7 +566,7 @@ export class LighterTripsService {
       throw new BadRequestException("vesselCallId is required");
     }
     const rows = await this.prisma.lighterAssignment.findMany({
-      where: { vesselCallId: id, deletedAt: null },
+      where: { vesselCallId: id, deletedAt: null, trip: null },
       orderBy: [{ assignedDate: "desc" }, { id: "desc" }],
       select: {
         id: true,
@@ -569,7 +579,7 @@ export class LighterTripsService {
         trip: { select: { id: true } }
       }
     });
-    return rows.filter((r) => r.trip == null);
+    return rows;
   }
 
   async listLighterVesselsForPicker(search?: string, limitRaw?: string, idRaw?: string) {
@@ -831,10 +841,19 @@ export class LighterTripsService {
     const layTzByCall = new Map(callZones.map((c) => [c.id, c.laytimeTimeZone]));
     const boardTrips = trips as TripBoardSelect[];
     const now = new Date();
+    const tripsByCall = new Map<string, TripBoardSelect[]>();
+    for (const trip of boardTrips) {
+      const existingTrips = tripsByCall.get(trip.vesselCallId);
+      if (existingTrips) {
+        existingTrips.push(trip);
+      } else {
+        tripsByCall.set(trip.vesselCallId, [trip]);
+      }
+    }
 
     const byVesselCallId: Record<string, ReturnType<typeof aggregateBoardMetrics>> = {};
     for (const id of vesselCallIds) {
-      const slice = boardTrips.filter((t) => t.vesselCallId === id);
+      const slice = tripsByCall.get(id) ?? [];
       byVesselCallId[id] = aggregateBoardMetrics(
         slice,
         assignBy.get(id) ?? 0,
