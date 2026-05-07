@@ -1,10 +1,11 @@
 import { clearSession, getAccessToken } from "@/lib/auth-storage";
 
-/** Dev fallback when `NEXT_PUBLIC_API_URL` is unset (Nest default port). */
-const FALLBACK_PUBLIC_API_BASE = "http://localhost:3000";
-
 export function getApiBase(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? FALLBACK_PUBLIC_API_BASE;
+  const apiBase = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiBase) {
+    throw new Error("NEXT_PUBLIC_API_URL must be set in frontend/.env.local");
+  }
+  return apiBase;
 }
 
 export class ApiError extends Error {

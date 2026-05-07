@@ -4,22 +4,17 @@ import compression from "compression";
 import { AppModule } from "./app.module";
 import { PrismaService } from "./prisma/prisma.service";
 
-const defaultBrowserOrigins = [
-  "http://localhost:3001",
-  "http://127.0.0.1:3001",
-  "http://localhost:7701",
-  "http://127.0.0.1:7701",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000"
-];
-
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.use(compression());
-  const fromEnv = process.env.CORS_ORIGINS?.split(",")
+  const originList = process.env.CORS_ORIGINS?.split(",")
     .map((o) => o.trim())
-    .filter(Boolean);
-  const originList = [...new Set([...(fromEnv ?? []), ...defaultBrowserOrigins])];
+    .filter(Boolean) ?? [];
+
+  if (originList.length === 0) {
+    throw new Error("CORS_ORIGINS must be set in .env with comma-separated origins");
+  }
+
   app.enableCors({
     origin: originList,
     credentials: true,

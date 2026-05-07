@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npx next dev -p 7701",
+    "dev": "node scripts/next-with-env-port.cjs dev",
     "build": "npx next build",
-    "start": "npx next start -p 7701",
+    "start": "node scripts/next-with-env-port.cjs start",
     "test": "vitest run"
   },
   "dependencies": {

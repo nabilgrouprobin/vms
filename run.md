@@ -1,18 +1,81 @@
-### Backend Setup
+# VMS Local Run Guide
+
+Use this guide when running VMS on a fresh machine/server or in day-to-day development.
+
+## Prerequisites
+
+- Node.js LTS and npm installed
+- PostgreSQL installed and running locally
+- Git installed
+
+## First-Time Setup (New Device)
+
+### 1) Clone Project
+
+```bash
+git clone <your-repo-url>
+cd VMS
+```
+
+### 2) Create Local Database
+
+Use the same database expected by backend `.env`:
+`postgresql://postgres:14789@localhost:5432/vms_db?schema=public`
+
+```bash
+createdb -U postgres vms_db
+```
+
+Alternative:
+
+```bash
+psql -U postgres -c "CREATE DATABASE vms_db;"
+```
+
+### 3) Backend Install + Database Setup
 
 ```bash
 cd backend
 npm install
+```
+
+Create `backend/.env` and set at least:
+
+```env
+DATABASE_URL=postgresql://postgres:14789@localhost:5432/vms_db?schema=public
+JWT_SECRET=replace-with-long-random-secret-min-16-chars
+JWT_EXPIRES_HOURS=8
+PORT=7700
+CORS_ORIGINS=http://localhost:7701,http://127.0.0.1:7701
+```
+
+Then run:
+
+```bash
+npx prisma migrate deploy
 npx prisma generate
 npm run build
 ```
 
-### Frontend Setup
+Optional seed data (recommended for first run):
 
 ```bash
-cd frontend
+npx tsx prisma/seed.ts
+```
+
+### 4) Frontend Install
+
+```bash
+cd ../frontend
 npm install
 npm run build
+```
+
+Create `frontend/.env`:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:7700
+PORT=7701
 ```
 
 ## Run in Development Mode
@@ -32,3 +95,41 @@ npm run dev
 cd frontend
 npm run dev
 ```
+
+## Quick Start (After Initial Setup)
+
+```bash
+# Terminal 1
+cd backend && npm run dev
+
+# Terminal 2
+cd frontend && npm run dev
+```
+
+## Notes for New Server
+
+- If PostgreSQL is on the same server, `localhost` in `DATABASE_URL` is correct.
+- If PostgreSQL is on another server, replace `localhost` with that DB host IP/domain.
+- Frontend and backend ports are now env-driven.
+
+## Change Ports Using .env Only
+
+You do not need to edit source code when changing ports.
+
+Update only these values:
+
+```env
+# backend/.env
+PORT=7700
+CORS_ORIGINS=http://localhost:7701,http://127.0.0.1:7701
+
+# frontend/.env (or frontend/.env.local)
+PORT=7701
+NEXT_PUBLIC_API_URL=http://localhost:7700
+```
+
+Rules:
+
+- If backend `PORT` changes, update frontend `NEXT_PUBLIC_API_URL`.
+- If frontend `PORT` changes, update backend `CORS_ORIGINS`.
+- Restart both servers after env changes.
