@@ -123,7 +123,7 @@ Update only these values:
 PORT=7700
 CORS_ORIGINS=http://localhost:7701,http://127.0.0.1:7701
 
-# frontend/.env (or frontend/.env.local)
+# frontend/.env (or frontend/.env)
 PORT=7701
 NEXT_PUBLIC_API_URL=http://localhost:7700
 ```
