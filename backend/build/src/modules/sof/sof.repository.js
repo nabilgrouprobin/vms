@@ -618,7 +618,7 @@ let SofRepository = class SofRepository {
             statementId: true,
             eventTypeId: true,
             eventTypeDefinition: {
-                select: { id: true, code: true, name: true }
+                select: { id: true, code: true, name: true, category: true }
             },
             eventTime: true,
             durationHours: true,

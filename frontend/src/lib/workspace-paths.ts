@@ -2,6 +2,9 @@ import type { ReadonlyURLSearchParams } from "next/navigation";
 
 import type { VesselSofWorkspaceSection } from "@/components/sof/detail/types";
 
+/** Dispatched from vessel SOF workspace before clearing `?id=` so sheets can close synchronously. */
+export const VESSEL_SOF_CLEAR_SELECTION_EVENT = "vms:vessel-sof-clear-selection";
+
 /**
  * Merge updates into the current query string and return `pathname?query`.
  * Pass `null`, `undefined`, or `""` for a key to remove it (e.g. clear `id`).
@@ -24,14 +27,62 @@ export function applySearchParams(
   return q ? `${pathname}?${q}` : pathname;
 }
 
+/** Query keys shared across `/vessel-sof/*` workspace pages (mother/lighter picker state). */
+const VESSEL_SOF_WORKSPACE_QUERY_KEYS = [
+  "kind",
+  "id",
+  "vesselCallId",
+  "lighterVesselId",
+  "pickSof"
+] as const;
+
+/** Build `pathname?…` carrying the current mother/lighter SOF selection for another vessel-sof route. */
+export function preserveVesselSofWorkspaceQuery(
+  targetPathname: string,
+  current: URLSearchParams | ReadonlyURLSearchParams
+): string {
+  const sp = new URLSearchParams();
+  for (const key of VESSEL_SOF_WORKSPACE_QUERY_KEYS) {
+    const v = current.get(key);
+    if (v != null && v !== "") sp.set(key, v);
+  }
+  const q = sp.toString();
+  return q ? `${targetPathname}?${q}` : targetPathname;
+}
+
+export function isVesselSofWorkspaceNavPath(pathname: string): boolean {
+  return (
+    pathname === "/vessel-sof/overview" ||
+    pathname === "/vessel-sof/events" ||
+    pathname === "/vessel-sof/laytime" ||
+    pathname === "/vessel-sof/discharge"
+  );
+}
+
+export type VesselSofWorkspaceQuery = {
+  id?: string | null;
+  vesselCallId?: string | null;
+  lighterVesselId?: string | null;
+  /** When set (e.g. after “Change SOF”), skip auto-selecting the only SOF so the user can choose another. */
+  pickSof?: string | null;
+};
+
 export function vesselSofWorkspacePath(
   section: VesselSofWorkspaceSection,
   kind: "mother" | "lighter",
-  id: string | null
+  selection?: VesselSofWorkspaceQuery | null
 ) {
   const sp = new URLSearchParams();
   sp.set("kind", kind);
-  if (id) sp.set("id", id);
+  const s = selection ?? {};
+  const sid = s.id?.trim();
+  const vc = s.vesselCallId?.trim();
+  const lv = s.lighterVesselId?.trim();
+  const pick = s.pickSof?.trim();
+  if (sid) sp.set("id", sid);
+  if (vc) sp.set("vesselCallId", vc);
+  if (lv) sp.set("lighterVesselId", lv);
+  if (pick) sp.set("pickSof", pick);
   return `/vessel-sof/${section}?${sp.toString()}`;
 }
 
@@ -48,14 +99,22 @@ export function reportsWorkspacePath(
   return `/reports?${sp.toString()}`;
 }
 
-/** Deep-link into Reports → Discharge & aging with optional SOF selected. */
-export function reportsDischargePath(kind: "mother" | "lighter", sofId: string | null) {
+/** Deep-link into Reports → Discharge & aging with vessel + optional SOF selection. */
+export function reportsDischargePath(
+  kind: "mother" | "lighter",
+  params: VesselSofWorkspaceQuery = {}
+) {
   const sp = new URLSearchParams();
   sp.set("kind", kind);
   sp.set("view", "discharge");
-  if (sofId) {
-    sp.set("id", sofId);
-  }
+  const sid = params.id?.trim();
+  const vc = params.vesselCallId?.trim();
+  const lv = params.lighterVesselId?.trim();
+  const pick = params.pickSof?.trim();
+  if (sid) sp.set("id", sid);
+  if (vc) sp.set("vesselCallId", vc);
+  if (lv) sp.set("lighterVesselId", lv);
+  if (pick) sp.set("pickSof", pick);
   return `/reports?${sp.toString()}`;
 }
 

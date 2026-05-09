@@ -7,6 +7,7 @@ class ListLighterVesselSofsQueryDto {
     status;
     lighterTripId;
     vesselCallId;
+    lighterVesselId;
     search;
 }
 exports.ListLighterVesselSofsQueryDto = ListLighterVesselSofsQueryDto;

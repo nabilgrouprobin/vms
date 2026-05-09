@@ -29,6 +29,25 @@ free_port() {
   fi
 }
 
+port_busy() {
+  local p="$1"
+  ss -ltn "( sport = :${p} )" 2>/dev/null | grep -q ":${p}\\b"
+}
+
+wait_for_port_free() {
+  local p="$1"
+  local attempts="${2:-20}" # ~10s with 0.5s sleep
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if ! port_busy "$p"; then
+      return 0
+    fi
+    free_port "$p"
+    sleep 0.5
+  done
+  return 1
+}
+
 # Remove PM2 apps so restarts don't stack listeners
 pm2 delete vms-backend 2>/dev/null || true
 pm2 delete vms-frontend 2>/dev/null || true
@@ -37,7 +56,16 @@ pm2 delete vms-frontend 2>/dev/null || true
 free_port "$BACKEND_PORT"
 free_port "$FRONTEND_PORT"
 
-sleep 1
+if ! wait_for_port_free "$BACKEND_PORT" || ! wait_for_port_free "$FRONTEND_PORT"; then
+  echo "[pm2-restart-vms] ERROR: one or more required ports are still busy."
+  echo "  backend:${BACKEND_PORT} busy=$(port_busy "$BACKEND_PORT" && echo yes || echo no)"
+  echo "  frontend:${FRONTEND_PORT} busy=$(port_busy "$FRONTEND_PORT" && echo yes || echo no)"
+  echo "Run once as root to force clear listeners:"
+  echo "  fuser -k ${BACKEND_PORT}/tcp ${FRONTEND_PORT}/tcp"
+  echo "Then rerun:"
+  echo "  ./scripts/pm2-restart-vms.sh"
+  exit 1
+fi
 
 echo "[pm2-restart-vms] building backend..."
 cd "$ROOT/backend"

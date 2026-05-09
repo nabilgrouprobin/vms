@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   flatSofEventInfinitePages,
   latestSofEventMetrics,
+  mergeLocalDatetimeParts,
+  parseHourMinute24Input,
   sortSofEventsChronoAsc,
   sofEventWindow,
+  splitLocalDatetimeInput,
   toDatetimeLocalValue
 } from "./sof-event-display";
 
@@ -63,7 +66,7 @@ describe("flatSofEventInfinitePages / latestSofEventMetrics", () => {
             {
               id: "a",
               eventTypeId: "et-a",
-              eventTypeDefinition: { id: "et-a", code: "X", name: "Other" },
+              eventTypeDefinition: { id: "et-a", code: "X", name: "Other", category: "NORMAL" },
               eventTime: "2024-01-01T10:00:00.000Z",
               durationHours: null,
               durationMinutes: null,
@@ -83,7 +86,7 @@ describe("flatSofEventInfinitePages / latestSofEventMetrics", () => {
             {
               id: "b",
               eventTypeId: "et-a",
-              eventTypeDefinition: { id: "et-a", code: "X", name: "Other" },
+              eventTypeDefinition: { id: "et-a", code: "X", name: "Other", category: "NORMAL" },
               eventTime: "2024-01-02T10:00:00.000Z",
               durationHours: null,
               durationMinutes: null,
@@ -111,5 +114,43 @@ describe("toDatetimeLocalValue", () => {
   it("formats ISO for datetime-local input", () => {
     const v = toDatetimeLocalValue("2024-03-15T08:30:00.000Z");
     expect(v).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+  });
+});
+
+describe("splitLocalDatetimeInput / mergeLocalDatetimeParts", () => {
+  it("round-trips yyyy-mm-ddTHH:mm", () => {
+    const v = "2024-06-01T14:05";
+    expect(splitLocalDatetimeInput(v)).toEqual({ date: "2024-06-01", time: "14:05" });
+    expect(mergeLocalDatetimeParts("2024-06-01", "14:05")).toBe("2024-06-01T14:05");
+  });
+
+  it("defaults missing time to midnight when merging", () => {
+    expect(mergeLocalDatetimeParts("2024-01-02", "")).toBe("2024-01-02T00:00");
+    expect(mergeLocalDatetimeParts("2024-01-02", "not-a-time")).toBe("2024-01-02T00:00");
+  });
+
+  it("returns empty date when splitting blank", () => {
+    expect(splitLocalDatetimeInput("")).toEqual({ date: "", time: "" });
+  });
+});
+
+describe("parseHourMinute24Input", () => {
+  it("normalizes colon forms", () => {
+    expect(parseHourMinute24Input("9:30")).toBe("09:30");
+    expect(parseHourMinute24Input("09:30")).toBe("09:30");
+    expect(parseHourMinute24Input("0:0")).toBe("00:00");
+    expect(parseHourMinute24Input("23:59")).toBe("23:59");
+  });
+
+  it("accepts HHMM without colon", () => {
+    expect(parseHourMinute24Input("0930")).toBe("09:30");
+    expect(parseHourMinute24Input("0000")).toBe("00:00");
+  });
+
+  it("returns null for empty or invalid", () => {
+    expect(parseHourMinute24Input("")).toBeNull();
+    expect(parseHourMinute24Input("24:00")).toBeNull();
+    expect(parseHourMinute24Input("12:60")).toBeNull();
+    expect(parseHourMinute24Input("99:30")).toBeNull();
   });
 });

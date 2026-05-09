@@ -4,7 +4,12 @@ import { List } from "react-window";
 
 import { cn } from "@/lib/utils";
 
-export type OptionRow = { id: string; label: string; description?: string };
+export type OptionRow = {
+  id: string;
+  label: string;
+  description?: string;
+  availability?: "free" | "used";
+};
 
 type RowCtx = {
   items: OptionRow[];
@@ -36,11 +41,25 @@ function OptionRow({
         type="button"
         className={cn(
           "flex h-full w-full flex-col items-start justify-center border-b border-border px-3 text-left text-sm hover:bg-accent",
+          item.availability === "free" && "bg-emerald-500/5",
+          item.availability === "used" && "bg-amber-500/5",
           selectedId === item.id && "bg-accent"
         )}
         onClick={() => onPick(item.id)}
       >
         <span className="font-medium leading-tight">{item.label}</span>
+        {item.availability ? (
+          <span
+            className={cn(
+              "mt-0.5 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+              item.availability === "free"
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+            )}
+          >
+            {item.availability === "free" ? "Free" : "In use"}
+          </span>
+        ) : null}
         {item.description ? (
           <span className="text-xs text-muted-foreground leading-tight">{item.description}</span>
         ) : null}

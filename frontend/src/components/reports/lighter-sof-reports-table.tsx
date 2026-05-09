@@ -13,6 +13,7 @@ import { DEFAULT_LAYTIME_IANA_ZONE } from "@/lib/timezone-gmt";
 import { fetchLighterTripBoardMetrics } from "@/lib/lighter-trips-api";
 import { fmtInt, fmtMt, metricsFor, parseMt } from "@/lib/reports-discharge-table-utils";
 import { fetchLighterSofs } from "@/lib/sof-api";
+import { vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import type { LighterSofListRow, Paginated } from "@/types/vms";
 
 export function LighterSofReportsTable({
@@ -242,7 +243,14 @@ export function LighterSofReportsTable({
               </td>
               <td className="px-1.5 py-2">
                 <Button variant="link" size="sm" className="h-auto p-0" asChild>
-                  <Link href={`/lighter-sof/${r.id}`}>Open</Link>
+                  <Link
+                    href={vesselSofWorkspacePath("overview", "lighter", {
+                      id: r.id,
+                      lighterVesselId: r.lighterTrip?.lighterVessel.id ?? null
+                    })}
+                  >
+                    Open
+                  </Link>
                 </Button>
               </td>
             </tr>

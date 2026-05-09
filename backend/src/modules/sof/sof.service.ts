@@ -210,11 +210,19 @@ export class SofService {
     query: ListLighterVesselSofsQueryDto
   ): Promise<PaginatedResult<unknown>> {
     const limit = parseLimit(query.limit, DEFAULT_SOF_PAGE_SIZE);
+    const lighterTripFilter: Prisma.LighterTripWhereInput | undefined =
+      query.vesselCallId || query.lighterVesselId
+        ? {
+            ...(query.vesselCallId ? { vesselCallId: query.vesselCallId } : {}),
+            ...(query.lighterVesselId ? { lighterVesselId: query.lighterVesselId } : {})
+          }
+        : undefined;
+
     const where: Prisma.StatementOfFactsWhereInput = {
       scope: SOFScope.LIGHTER_VESSEL,
       ...(query.status ? { status: query.status } : {}),
       ...(query.lighterTripId ? { lighterTripId: query.lighterTripId } : {}),
-      ...(query.vesselCallId ? { lighterTrip: { vesselCallId: query.vesselCallId } } : {}),
+      ...(lighterTripFilter ? { lighterTrip: lighterTripFilter } : {}),
       ...(query.search
         ? {
             OR: [

@@ -11,14 +11,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDt } from "@/lib/format";
-import {
-  formatDecimalHoursToDaysHMin,
-  formatDecimalHoursToTotalHoursMin,
-  formatTime24To12Label
-} from "@/lib/laytime-hours-format";
+import { formatDecimalHoursToDaysHMin, formatDecimalHoursToTotalHoursMin } from "@/lib/laytime-hours-format";
 import { fetchImportContract, patchImportContract } from "@/lib/import-contracts-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { patchVesselCall } from "@/lib/vessel-calls-api";
+import { vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = [
@@ -161,9 +158,6 @@ function ImportContractWeekWindowFields({
             value={weekStartTime}
             onChange={(e) => setWeekStartTime(e.target.value)}
           />
-          <span className="text-xs text-muted-foreground">
-            {formatTime24To12Label(weekStartTime)}
-          </span>
         </div>
       </div>
       <div className={cn("space-y-2 sm:col-span-2", compact && "space-y-1")}>
@@ -192,9 +186,6 @@ function ImportContractWeekWindowFields({
             value={weekEndTime}
             onChange={(e) => setWeekEndTime(e.target.value)}
           />
-          <span className="text-xs text-muted-foreground">
-            {formatTime24To12Label(weekEndTime)}
-          </span>
         </div>
       </div>
     </div>
@@ -376,7 +367,7 @@ export function ImportContractLaytimeForm({
       {!embedded ? (
         <div>
           <Button variant="ghost" size="sm" asChild className="mb-1 -ml-2 h-8 px-2">
-            <Link href="/mother-sof">← Mother SOF</Link>
+            <Link href={vesselSofWorkspacePath("overview", "mother")}>← Mother SOF</Link>
           </Button>
           <h1 className="text-2xl font-bold tracking-tight">Import contract · laytime</h1>
           <p className="text-sm text-muted-foreground">{c.contractNo}</p>
@@ -442,7 +433,7 @@ export function ImportContractLaytimeForm({
               <CardDescription className="text-xs">
                 <span className="font-medium text-foreground">Week starts on / Week ends on</span>{" "}
                 define when contract contact hours count on the daily laytime sheet (e.g. Sunday
-                8:00 AM through Thursday 5:00 PM). Save here, then use{" "}
+                08:00 through Thursday 17:00). Save here, then use{" "}
                 <span className="font-medium text-foreground">Recalculate laytime</span> below.
                 Cargo quantity and discharge rate set allowed laytime. Excluded weekdays for SOF
                 segments are derived from this week span.

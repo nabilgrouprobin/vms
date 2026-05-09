@@ -14,7 +14,7 @@ export type SofStatus = (typeof SOF_STATUS)[number];
 export const SOF_EVENT_TYPE_SCOPES = ["MOTHER_VESSEL", "LIGHTER_VESSEL", "BOTH"] as const;
 export type SofEventTypeScopeUi = (typeof SOF_EVENT_TYPE_SCOPES)[number];
 
-/** Hold/Delay vs Normal — drives the SOF event's `isHold` automatically. */
+/** Hold vs normal — drives the SOF event's `isHold` automatically from the event type. */
 export const SOF_EVENT_TYPE_CATEGORIES = ["NORMAL", "HOLD_DELAY"] as const;
 export type SofEventTypeCategoryUi = (typeof SOF_EVENT_TYPE_CATEGORIES)[number];
 
@@ -367,7 +367,7 @@ export type MasterGhatRow = {
 export type SofEventListItem = {
   id: string;
   eventTypeId: string;
-  eventTypeDefinition: { id: string; code: string; name: string };
+  eventTypeDefinition: { id: string; code: string; name: string; category: SofEventTypeCategoryUi };
   eventTime: string;
   durationHours: string | null;
   /** Whole minutes from period start to `eventTime`; preferred over `durationHours`. */

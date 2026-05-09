@@ -18,6 +18,7 @@ import { getApiBase } from "@/lib/api";
 import { formatDt } from "@/lib/format";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { fetchLighterSofs, fetchMotherSofs } from "@/lib/sof-api";
+import { vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import type { LighterSofListRow, MotherSofListRow, Paginated } from "@/types/vms";
 
 type Variant = "mother" | "lighter";
@@ -179,7 +180,14 @@ export function SofDirectoryList({ variant }: { variant: Variant }) {
             <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {(rows as MotherSofListRow[]).map((r) => (
                 <li key={r.id} className="min-w-0">
-                  <Link href={`/mother-sof/${r.id}`} prefetch className="block h-full">
+                  <Link
+                    href={vesselSofWorkspacePath("overview", "mother", {
+                      id: r.id,
+                      vesselCallId: r.vesselCall?.id ?? null
+                    })}
+                    prefetch
+                    className="block h-full"
+                  >
                     <Card className="h-full transition-colors hover:bg-accent/40">
                       <CardHeader className="flex h-full flex-col gap-3 py-4">
                         <div className="flex flex-col gap-2">
@@ -207,7 +215,10 @@ export function SofDirectoryList({ variant }: { variant: Variant }) {
               {(rows as LighterSofListRow[]).map((r) => (
                 <li key={r.id} className="flex min-w-0 flex-col gap-1">
                   <Link
-                    href={`/lighter-sof/${r.id}`}
+                    href={vesselSofWorkspacePath("overview", "lighter", {
+                      id: r.id,
+                      lighterVesselId: r.lighterTrip?.lighterVessel.id ?? null
+                    })}
                     prefetch
                     className="block h-full min-h-0 flex-1"
                   >

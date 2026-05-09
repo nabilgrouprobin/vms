@@ -29,9 +29,9 @@ describe("parseContractWeekWindow", () => {
 });
 
 describe("formatContractWeekWindowLabel", () => {
-  it("formats 12h labels for a Sun–Thu window", () => {
+  it("formats 24h labels for a Sun–Thu window", () => {
     const w: ContractWeekWindow = { startJsDow: 0, startHm: "08:00", endJsDow: 4, endHm: "17:00" };
-    assert.equal(formatContractWeekWindowLabel(w), "Sunday 8:00 AM → Thursday 5:00 PM");
+    assert.equal(formatContractWeekWindowLabel(w), "Sunday 08:00 → Thursday 17:00");
   });
 });
 

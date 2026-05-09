@@ -69,17 +69,14 @@ const WEEKDAY_LONG = [
     "Friday",
     "Saturday"
 ];
-function formatHmTo12h(hm) {
+function formatHm24(hm) {
     const { hour, minute } = parseHm(hm);
-    const mm = minute.toString().padStart(2, "0");
-    const am = hour < 12;
-    const h12 = hour % 12 === 0 ? 12 : hour % 12;
-    return `${h12}:${mm} ${am ? "AM" : "PM"}`;
+    return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 function formatContractWeekWindowLabel(w) {
     const sd = WEEKDAY_LONG[w.startJsDow] ?? WEEKDAY_LONG[0];
     const ed = WEEKDAY_LONG[w.endJsDow] ?? WEEKDAY_LONG[4];
-    return `${sd} ${formatHmTo12h(w.startHm)} → ${ed} ${formatHmTo12h(w.endHm)}`;
+    return `${sd} ${formatHm24(w.startHm)} → ${ed} ${formatHm24(w.endHm)}`;
 }
 function atSundayPlus(sun0, jsDow, hm) {
     const { hour, minute } = parseHm(hm);
@@ -186,7 +183,8 @@ function buildMotherLaytimeDailyLedger(params) {
         if (!dt.isValid)
             continue;
         const k = ymd(dt.startOf("day"));
-        const line = [ev.eventType.replace(/_/g, " "), ev.remarks?.trim()].filter(Boolean).join(" · ");
+        const clock = dt.toFormat("HH:mm");
+        const line = [clock, ev.eventType.replace(/_/g, " "), ev.remarks?.trim()].filter(Boolean).join(" · ");
         if (!eventsByDay.has(k))
             eventsByDay.set(k, []);
         eventsByDay.get(k).push(line);

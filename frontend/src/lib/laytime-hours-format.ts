@@ -57,15 +57,3 @@ export function formatDecimalHoursToDaysHMin(value: number | string | null | und
   return `${sign}${parts.join(" ")}`;
 }
 
-/** `HH:mm` (24h) → "8:00 AM" for labels */
-export function formatTime24To12Label(hhmm: string | null | undefined): string {
-  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm.trim())) return "—";
-  const [hs, ms] = hhmm.trim().split(":");
-  let h = parseInt(hs, 10);
-  const m = parseInt(ms, 10);
-  if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) return hhmm;
-  const ap = h >= 12 ? "PM" : "AM";
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${h}:${m.toString().padStart(2, "0")} ${ap}`;
-}

@@ -51,6 +51,7 @@ import {
 } from "@/lib/timezone-gmt";
 import { fetchSofEventTypeOptions } from "@/lib/master-data-api";
 import { parseApiErr } from "@/lib/parse-api-error";
+import { VESSEL_SOF_CLEAR_SELECTION_EVENT } from "@/lib/workspace-paths";
 import { patchVesselCall } from "@/lib/vessel-calls-api";
 import {
   createMotherSofEvent,
@@ -64,7 +65,7 @@ import {
   type MotherLaytimeTimesheet
 } from "@/lib/sof-api";
 import type { VesselSofWorkspaceSection } from "@/components/sof/detail/types";
-import type { Paginated, SofEventListItem } from "@/types/vms";
+import type { Paginated, SofEventListItem, SofEventTypeCategoryUi } from "@/types/vms";
 import { SOF_STATUS } from "@/types/vms";
 
 type MotherSofDetail = {
@@ -86,7 +87,7 @@ type MotherSofDetail = {
   events: Array<{
     id: string;
     eventTypeId: string;
-    eventTypeDefinition: { id: string; code: string; name: string };
+    eventTypeDefinition: { id: string; code: string; name: string; category: SofEventTypeCategoryUi };
     eventTime: string;
     remarks: string | null;
     isHold: boolean;
@@ -194,6 +195,12 @@ export function MotherSofDetailView({
     if (!list?.length) return;
     setEvType((prev) => (prev && list.some((t) => t.id === prev) ? prev : list[0].id));
   }, [eventTypesQ.data]);
+
+  useEffect(() => {
+    const onWorkspaceClear = () => setAddEventOpen(false);
+    window.addEventListener(VESSEL_SOF_CLEAR_SELECTION_EVENT, onWorkspaceClear);
+    return () => window.removeEventListener(VESSEL_SOF_CLEAR_SELECTION_EVENT, onWorkspaceClear);
+  }, []);
 
   const openAddEvent = (prefill?: { startIso?: string | null; endIso?: string | null }) => {
     setEvErr(null);
@@ -395,7 +402,6 @@ export function MotherSofDetailView({
       readOnly={sof.status === "CLOSED"}
       eventsQueryKey={["mother-sof-events", id]}
       eventsCsvBasename={`${sof.sofNo}-events`}
-      showStatusColumn={false}
       onEventsChanged={() => {
         void qc.invalidateQueries({ queryKey: ["mother-sof", id] });
       }}

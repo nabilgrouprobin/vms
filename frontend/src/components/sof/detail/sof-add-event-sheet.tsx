@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { cn } from "@/lib/utils";
 import type { SofEventTypeOption } from "@/types/vms";
 
@@ -16,10 +17,10 @@ export type SofAddEventCurrentUser = { id: string; fullName: string; email: stri
 export type SofAddEventFields = {
   evType: string;
   setEvType: (v: string) => void;
-  /** datetime-local value (local time, no zone) for the event end. */
+  /** Local `yyyy-mm-ddTHH:mm` (no zone suffix) for the event end — from paired date/time inputs. */
   evTime: string;
   setEvTime: (v: string) => void;
-  /** Optional explicit start time. When blank, backend chains from previous row end. */
+  /** Optional explicit start (`yyyy-mm-ddTHH:mm`). When blank, backend chains from previous row end. */
   evStartTime: string;
   setEvStartTime: (v: string) => void;
   evRemarks: string;
@@ -76,7 +77,7 @@ export function SofAddEventSheet({
   const selectedIsHold = selectedType?.category === "HOLD_DELAY";
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent side="right" className="flex w-full flex-col gap-4 overflow-y-auto sm:max-w-md">
         <div className="space-y-1.5 pr-8">
           <SheetTitle>Add event</SheetTitle>
@@ -96,7 +97,7 @@ export function SofAddEventSheet({
               ) : null}
               {eventTypes.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({t.code})
+                  {t.name}
                 </option>
               ))}
             </select>
@@ -104,7 +105,7 @@ export function SofAddEventSheet({
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>Category:</span>
                 {selectedIsHold ? (
-                  <Badge variant="warning">Hold / delay</Badge>
+                  <Badge variant="warning">Hold</Badge>
                 ) : (
                   <span className="font-medium text-foreground">Normal</span>
                 )}
@@ -122,25 +123,31 @@ export function SofAddEventSheet({
           </div>
           <div className="space-y-2">
             <Label>Event ends at</Label>
-            <Input
-              type="datetime-local"
-              className="h-10 min-h-10"
+            <p className="text-xs text-muted-foreground">
+              Pick the date, then type time as <span className="font-mono text-foreground">HH:mm</span>{" "}
+              (24-hour only, e.g. 14:30 — no AM/PM).
+            </p>
+            <SofLocalDatetimeInputs
+              className="min-h-10"
+              dateInputClassName="h-10"
+              timeInputClassName="h-10"
               value={evTime}
-              onChange={(e) => setEvTime(e.target.value)}
+              onChange={setEvTime}
             />
           </div>
           <div className="space-y-2">
             <Label>Event starts at</Label>
-            <Input
-              type="datetime-local"
-              className="h-10 min-h-10"
+            <SofLocalDatetimeInputs
+              className="min-h-10"
+              dateInputClassName="h-10"
+              timeInputClassName="h-10"
               value={evStartTime}
-              onChange={(e) => setEvStartTime(e.target.value)}
+              onChange={setEvStartTime}
             />
             <p className="text-xs text-muted-foreground">
               Defaults to the previous event’s end time so the timeline chains automatically.
-              Adjust it to fill a gap or insert an event between existing rows. Clear it to chain
-              implicitly on the server.
+              Adjust it to fill a gap or insert an event between existing rows. Clear the date field
+              to chain implicitly on the server.
             </p>
           </div>
           <div className="space-y-2">

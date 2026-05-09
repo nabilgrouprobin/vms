@@ -18,8 +18,8 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -32,26 +32,30 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { clearSession, getUserProfile, type StoredUserProfile } from "@/lib/auth-storage";
+import {
+  isVesselSofWorkspaceNavPath,
+  preserveVesselSofWorkspaceQuery
+} from "@/lib/workspace-paths";
 import { cn } from "@/lib/utils";
 
 const nav: Array<{
-  href: string;
+  path: string;
   label: string;
   icon: typeof Anchor;
   isActive?: (pathname: string) => boolean;
 }> = [
-  { href: "/", label: "Home", icon: Anchor },
-  { href: "/vessel-sof/overview", label: "Overview", icon: LayoutDashboard },
-  { href: "/vessel-sof/events", label: "Events", icon: ListChecks },
-  { href: "/vessel-sof/laytime", label: "Laytime calculation", icon: Calculator },
+  { path: "/", label: "Home", icon: Anchor },
+  { path: "/vessel-sof/overview", label: "Overview", icon: LayoutDashboard },
+  { path: "/vessel-sof/events", label: "Events", icon: ListChecks },
+  { path: "/vessel-sof/laytime", label: "Laytime calculation", icon: Calculator },
   {
-    href: "/trips",
+    path: "/trips",
     label: "Trips",
     icon: Route,
     isActive: (p) => p === "/trips" || p.startsWith("/trips/")
   },
   {
-    href: "/reports",
+    path: "/reports",
     label: "Reports",
     icon: ClipboardList,
     isActive: (p) =>
@@ -62,26 +66,30 @@ const nav: Array<{
       p.startsWith("/vessel-sof/discharge/")
   },
   {
-    href: "/master-data",
+    path: "/master-data",
     label: "Master data",
     icon: Database,
     isActive: (p) => p === "/master-data" || p.startsWith("/master-data/")
   }
 ];
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLinksInner({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   return (
     <nav className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-1">
-      {nav.map(({ href, label, icon: Icon, isActive }) => {
+      {nav.map(({ path, label, icon: Icon, isActive }) => {
         const active = isActive
           ? isActive(pathname)
-          : href === "/"
+          : path === "/"
             ? pathname === "/"
-            : pathname === href || pathname.startsWith(`${href}/`);
+            : pathname === path || pathname.startsWith(`${path}/`);
+        const href = isVesselSofWorkspaceNavPath(path)
+          ? preserveVesselSofWorkspaceQuery(path, searchParams)
+          : path;
         return (
           <Link
-            key={href}
+            key={path}
             href={href}
             onClick={onNavigate}
             className={cn(
@@ -97,6 +105,32 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
         );
       })}
     </nav>
+  );
+}
+
+function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Suspense
+      fallback={
+        <nav className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-1">
+          {nav.map(({ path, label, icon: Icon }) => (
+            <Link
+              key={path}
+              href={path}
+              onClick={onNavigate}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Icon className="size-4 shrink-0" />
+              {label}
+            </Link>
+          ))}
+        </nav>
+      }
+    >
+      <NavLinksInner onNavigate={onNavigate} />
+    </Suspense>
   );
 }
 

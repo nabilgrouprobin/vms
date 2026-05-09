@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -114,16 +115,17 @@ export function TripsTripEditSheet({ tripId, open, onOpenChange, invalidateKeys 
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="ed-cc">Carrier confirmed at</Label>
-              <Input
-                id="ed-cc"
-                type="datetime-local"
-                value={carrierConfirmedAt}
-                onChange={(e) => setCarrierConfirmedAt(e.target.value)}
-              />
+              <Label>Carrier confirmed at</Label>
               <p className="text-xs text-muted-foreground">
-                Leave empty to skip. Set to record carrier acceptance on the linked allocation.
+                Local date and time · 24-hour clock. Leave empty to skip.
               </p>
+              <SofLocalDatetimeInputs
+                className="pt-0.5"
+                dateInputClassName="h-9"
+                timeInputClassName="h-9"
+                value={carrierConfirmedAt}
+                onChange={setCarrierConfirmedAt}
+              />
             </div>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <div className="mt-auto flex gap-2 border-t border-border pt-4">

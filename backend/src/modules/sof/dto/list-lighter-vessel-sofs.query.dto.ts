@@ -6,5 +6,7 @@ export class ListLighterVesselSofsQueryDto {
   status?: SOFStatus;
   lighterTripId?: string;
   vesselCallId?: string;
+  /** Filter SOFs whose trip uses this lighter-class vessel (hull). */
+  lighterVesselId?: string;
   search?: string;
 }

@@ -103,6 +103,56 @@ export function toDatetimeLocalValue(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Split `yyyy-mm-ddTHH:mm` or a parseable ISO/local string into date + time for paired inputs. */
+export function splitLocalDatetimeInput(v: string): { date: string; time: string } {
+  const s = v?.trim() ?? "";
+  if (!s) return { date: "", time: "" };
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (m) return { date: m[1]!, time: m[2]! };
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  };
+}
+
+/** Combine calendar date and `HH:mm` into the same shape as `toDatetimeLocalValue` (local, no zone suffix). */
+export function mergeLocalDatetimeParts(date: string, time: string): string {
+  const d = date.trim();
+  if (!d) return "";
+  const tRaw = time.trim();
+  const t = /^\d{2}:\d{2}$/.test(tRaw) ? tRaw : "00:00";
+  return `${d}T${t}`;
+}
+
+/**
+ * Parse manual 24-hour clock entry (no AM/PM). Accepts `H`, `HH`, `H:M`, `HH:MM`, or four digits
+ * `HHMM`. Returns normalized `HH:mm` or null if empty/invalid.
+ */
+export function parseHourMinute24Input(raw: string): string | null {
+  const s = raw.trim().replace(/\s+/g, "");
+  if (!s) return null;
+  const hhmm = s.match(/^(\d{2})(\d{2})$/);
+  if (hhmm) {
+    const h = parseInt(hhmm[1], 10);
+    const min = parseInt(hhmm[2], 10);
+    if (!Number.isFinite(h) || h < 0 || h > 23 || !Number.isFinite(min) || min < 0 || min > 59) {
+      return null;
+    }
+    return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  }
+  const m = s.match(/^(\d{1,2})(?::(\d{1,2})?)?$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const minPart = m[2];
+  const min = minPart === undefined || minPart === "" ? 0 : parseInt(minPart, 10);
+  if (!Number.isFinite(h) || h < 0 || h > 23) return null;
+  if (!Number.isFinite(min) || min < 0 || min > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
 /** Shape of `useInfiniteQuery` data for SOF event lists. */
 export type SofEventInfinitePages = {
   pages: Array<{ data: SofEventListItem[] }>;

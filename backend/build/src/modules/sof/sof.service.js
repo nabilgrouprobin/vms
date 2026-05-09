@@ -163,11 +163,17 @@ let SofService = class SofService {
     }
     async listLighterVesselSofs(query) {
         const limit = (0, sof_validator_1.parseLimit)(query.limit, sof_constants_1.DEFAULT_SOF_PAGE_SIZE);
+        const lighterTripFilter = query.vesselCallId || query.lighterVesselId
+            ? {
+                ...(query.vesselCallId ? { vesselCallId: query.vesselCallId } : {}),
+                ...(query.lighterVesselId ? { lighterVesselId: query.lighterVesselId } : {})
+            }
+            : undefined;
         const where = {
             scope: client_1.SOFScope.LIGHTER_VESSEL,
             ...(query.status ? { status: query.status } : {}),
             ...(query.lighterTripId ? { lighterTripId: query.lighterTripId } : {}),
-            ...(query.vesselCallId ? { lighterTrip: { vesselCallId: query.vesselCallId } } : {}),
+            ...(lighterTripFilter ? { lighterTrip: lighterTripFilter } : {}),
             ...(query.search
                 ? {
                     OR: [

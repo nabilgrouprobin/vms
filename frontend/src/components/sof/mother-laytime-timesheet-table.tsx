@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { formatNum } from "@/lib/format";
+import { formatDt, formatNum } from "@/lib/format";
 import {
   formatDecimalHoursToDaysHMin,
   formatDecimalHoursToHMin,
@@ -230,10 +230,10 @@ export function MotherLaytimeTimesheetTable({
               className="border-b"
             >
               <td className="whitespace-nowrap px-2 py-1.5 font-mono text-[11px]">
-                {row.periodFrom.slice(0, 16)}
+                {formatDt(row.periodFrom)}
               </td>
               <td className="whitespace-nowrap px-2 py-1.5 font-mono text-[11px]">
-                {row.periodTo.slice(0, 16)}
+                {formatDt(row.periodTo)}
               </td>
               <td className="px-2 py-1.5 text-right font-mono text-[11px]">
                 {formatDecimalHoursToHMin(row.countingUsedHours)}

@@ -13,6 +13,7 @@ import { DEFAULT_LAYTIME_IANA_ZONE } from "@/lib/timezone-gmt";
 import { fetchLighterTripBoardMetrics } from "@/lib/lighter-trips-api";
 import { fmtInt, fmtMt, metricsFor, parseMt } from "@/lib/reports-discharge-table-utils";
 import { fetchMotherSofs } from "@/lib/sof-api";
+import { vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import type { MotherSofListRow, Paginated } from "@/types/vms";
 
 export function MotherDischargeReportsTable({
@@ -229,7 +230,14 @@ export function MotherDischargeReportsTable({
               </td>
               <td className="px-1.5 py-2">
                 <Button variant="link" size="sm" className="h-auto p-0" asChild>
-                  <Link href={`/mother-sof/${r.id}`}>Open</Link>
+                  <Link
+                    href={vesselSofWorkspacePath("overview", "mother", {
+                      id: r.id,
+                      vesselCallId: r.vesselCall?.id ?? null
+                    })}
+                  >
+                    Open
+                  </Link>
                 </Button>
               </td>
             </tr>

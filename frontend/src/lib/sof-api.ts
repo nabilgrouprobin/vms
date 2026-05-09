@@ -18,12 +18,14 @@ export function fetchMotherSofs(params: {
   cursor?: string;
   search?: string;
   status?: string;
+  vesselCallId?: string;
 }) {
   const sp = new URLSearchParams();
   if (params.limit) sp.set("limit", String(params.limit));
   if (params.cursor) sp.set("cursor", params.cursor);
   if (params.search) sp.set("search", params.search);
   if (params.status) sp.set("status", params.status);
+  if (params.vesselCallId) sp.set("vesselCallId", params.vesselCallId);
   const q = sp.toString();
   return api<Paginated<MotherSofListRow>>(`${prefix}/mother-vessels${q ? `?${q}` : ""}`);
 }
@@ -96,6 +98,8 @@ export function fetchLighterSofs(params: {
   search?: string;
   status?: string;
   lighterTripId?: string;
+  vesselCallId?: string;
+  lighterVesselId?: string;
 }) {
   const sp = new URLSearchParams();
   if (params.limit) sp.set("limit", String(params.limit));
@@ -103,6 +107,8 @@ export function fetchLighterSofs(params: {
   if (params.search) sp.set("search", params.search);
   if (params.status) sp.set("status", params.status);
   if (params.lighterTripId) sp.set("lighterTripId", params.lighterTripId);
+  if (params.vesselCallId) sp.set("vesselCallId", params.vesselCallId);
+  if (params.lighterVesselId) sp.set("lighterVesselId", params.lighterVesselId);
   const q = sp.toString();
   return api<Paginated<LighterSofListRow>>(`${prefix}/lighter-vessels${q ? `?${q}` : ""}`);
 }

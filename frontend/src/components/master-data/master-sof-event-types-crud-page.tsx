@@ -171,7 +171,7 @@ export function MasterSofEventTypesCrudPage() {
 
   const fmtScope = (s: string) => s.replace(/_/g, " ");
   const fmtCategory = (c: SofEventTypeCategoryUi) =>
-    c === "HOLD_DELAY" ? "Hold / delay" : "Normal";
+    c === "HOLD_DELAY" ? "Hold" : "Normal";
 
   const scopeTabs: { id: SofAdminScopeTab; label: string }[] = [
     { id: "ALL", label: "All" },
@@ -297,7 +297,7 @@ export function MasterSofEventTypesCrudPage() {
                       <td className="px-3 py-2 text-muted-foreground">{fmtScope(row.scope)}</td>
                       <td className="px-3 py-2">
                         {row.category === "HOLD_DELAY" ? (
-                          <Badge variant="warning">Hold / delay</Badge>
+                          <Badge variant="warning">Hold</Badge>
                         ) : (
                           <span className="text-muted-foreground">Normal</span>
                         )}
@@ -432,7 +432,7 @@ export function MasterSofEventTypesCrudPage() {
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
-              Hold / delay flags every SOF event of this type as a hold automatically.
+              Hold flags every SOF event of this type as a hold automatically.
             </p>
           </div>
 

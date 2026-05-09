@@ -5,5 +5,6 @@ export declare class ListLighterVesselSofsQueryDto {
     status?: SOFStatus;
     lighterTripId?: string;
     vesselCallId?: string;
+    lighterVesselId?: string;
     search?: string;
 }

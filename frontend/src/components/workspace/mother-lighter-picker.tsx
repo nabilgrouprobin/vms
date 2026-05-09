@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 /** Fixed scroll viewport — outer size never grows with item count; only the inner pane scrolls. */
@@ -20,10 +19,14 @@ const scrollViewportClass =
 const panelScrollViewportClass =
   "flex h-[min(70vh,32rem)] max-h-[min(70vh,32rem)] min-h-[16rem] w-full shrink-0 flex-col overflow-hidden";
 
-const tabsListClass = "!grid h-auto w-full grid-cols-2 gap-1 lg:!inline-flex lg:h-10 lg:w-auto";
+const tabsListClass = "!grid h-auto w-full grid-cols-2 gap-1 lg:!inline-flex lg:h-11 lg:w-auto";
+
+const kindTriggerClass =
+  "inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-transparent px-3 py-1 text-sm font-semibold ring-offset-background transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:h-9 lg:px-6";
 
 type Kind = "mother" | "lighter";
 
+/** Plain buttons — avoids nested Radix `<Tabs>` conflicts (e.g. Reports view tabs + this picker). */
 function MotherLighterKindTabs({
   value,
   onKindChange
@@ -32,20 +35,43 @@ function MotherLighterKindTabs({
   onKindChange: (next: Kind) => void;
 }) {
   return (
-    <Tabs
-      value={value}
-      onValueChange={(v) => onKindChange(v === "lighter" ? "lighter" : "mother")}
-      className="w-full lg:w-auto lg:shrink-0"
+    <div
+      role="tablist"
+      aria-label="Mother vessel or lighter"
+      className={cn(
+        "relative z-20 w-full rounded-xl border border-border/70 bg-muted/70 p-1 text-muted-foreground shadow-sm lg:w-auto lg:shrink-0",
+        tabsListClass
+      )}
     >
-      <TabsList className={tabsListClass}>
-        <TabsTrigger value="mother" className="lg:px-6">
-          Mother vessel
-        </TabsTrigger>
-        <TabsTrigger value="lighter" className="lg:px-6">
-          Lighter
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "mother"}
+        className={cn(
+          kindTriggerClass,
+          value === "mother"
+            ? "border-sky-300/50 bg-sky-500/15 text-sky-800 shadow-sm dark:border-sky-400/30 dark:text-sky-200"
+            : "text-muted-foreground hover:border-border hover:bg-background/70 hover:text-foreground"
+        )}
+        onClick={() => onKindChange("mother")}
+      >
+        Mother vessel
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "lighter"}
+        className={cn(
+          kindTriggerClass,
+          value === "lighter"
+            ? "border-violet-300/50 bg-violet-500/15 text-violet-800 shadow-sm dark:border-violet-400/30 dark:text-violet-200"
+            : "text-muted-foreground hover:border-border hover:bg-background/70 hover:text-foreground"
+        )}
+        onClick={() => onKindChange("lighter")}
+      >
+        Lighter
+      </button>
+    </div>
   );
 }
 
@@ -140,10 +166,12 @@ export function MotherLighterPickerToolbar({
 
 function pickerTileClass(selected?: boolean, disabled?: boolean) {
   return cn(
-    "flex h-[4.75rem] w-full flex-col justify-center rounded-lg border bg-card px-2.5 py-2 text-left shadow-sm transition-colors",
+    "flex h-[4.75rem] w-full flex-col justify-center rounded-lg border bg-card px-2.5 py-2 text-left shadow-sm transition-all duration-150",
     "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
     disabled && "cursor-not-allowed opacity-50",
-    selected ? "border-primary ring-2 ring-primary/20" : "border-border hover:bg-muted/60"
+    selected
+      ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+      : "border-border hover:-translate-y-px hover:bg-muted/60 hover:shadow"
   );
 }
 
@@ -153,6 +181,7 @@ function pickerTileClass(selected?: boolean, disabled?: boolean) {
 export function SelectablePickerCard({
   title,
   details,
+  availability,
   selected,
   disabled,
   onClick,
@@ -160,6 +189,7 @@ export function SelectablePickerCard({
 }: {
   title: string;
   details: string;
+  availability?: "free" | "used";
   selected?: boolean;
   disabled?: boolean;
   onClick?: () => void;
@@ -167,7 +197,21 @@ export function SelectablePickerCard({
 }) {
   const body = (
     <>
-      <span className="line-clamp-1 text-sm font-medium leading-tight">{title}</span>
+      <div className="flex items-center gap-2">
+        <span className="line-clamp-1 text-sm font-medium leading-tight">{title}</span>
+        {availability ? (
+          <span
+            className={cn(
+              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+              availability === "free"
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+            )}
+          >
+            {availability === "free" ? "Free" : "In use"}
+          </span>
+        ) : null}
+      </div>
       <span className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
         {details}
       </span>
@@ -245,16 +289,25 @@ export function SelectedSofChip({
   title,
   details,
   changeLabel = "Change SOF",
+  /** Prefer with `onNavigateClick` — same reliable navigation as `Link href={listHref}` (works inside nested Tabs/Suspense). */
+  changeHref,
+  onNavigateClick,
   onChange
 }: {
   kind: "mother" | "lighter";
   title: string;
   details?: string;
   changeLabel?: string;
-  onChange: () => void;
+  changeHref?: string;
+  /** Runs synchronously before following `changeHref` (e.g. close sheets). */
+  onNavigateClick?: () => void;
+  /** Used when `changeHref` is omitted (button-only clear). */
+  onChange?: () => void;
 }) {
+  const useLink = typeof changeHref === "string" && changeHref.length > 0;
+
   return (
-    <Card className="w-full">
+    <Card className="relative z-10 w-full">
       <CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <Badge variant={kind === "mother" ? "default" : "secondary"} className="shrink-0">
@@ -267,15 +320,29 @@ export function SelectedSofChip({
             ) : null}
           </div>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="w-full sm:w-auto"
-          onClick={onChange}
-        >
-          {changeLabel}
-        </Button>
+        {useLink ? (
+          <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+            <Link
+              href={changeHref}
+              scroll={false}
+              onClick={() => {
+                onNavigateClick?.();
+              }}
+            >
+              {changeLabel}
+            </Link>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full sm:w-auto"
+            onClick={onChange}
+          >
+            {changeLabel}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );
@@ -292,9 +359,9 @@ export function MotherLighterPickerCard({
   footer?: ReactNode;
 }) {
   return (
-    <Card className="w-full min-w-0 overflow-hidden">
+    <Card className="relative z-10 w-full min-w-0 overflow-hidden">
       <CardContent className="flex min-h-0 min-w-0 flex-col gap-4 px-4 pb-4 pt-5 sm:px-5 sm:pb-5 sm:pt-6">
-        <div className="shrink-0">{toolbar}</div>
+        <div className="relative z-10 shrink-0">{toolbar}</div>
         {children != null ? <div className="min-h-0 min-w-0 shrink-0">{children}</div> : null}
         {footer != null ? <div className="shrink-0 pt-1">{footer}</div> : null}
       </CardContent>

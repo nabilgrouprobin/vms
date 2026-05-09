@@ -74,8 +74,7 @@ export function TripsAssignMotherSheet({
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["trips-by-lighter-hull", lighterVesselId] });
-      await qc.invalidateQueries({ queryKey: ["trips-vessel-call-picker"] });
-      await qc.invalidateQueries({ queryKey: ["trips-lighter-hull-picker"] });
+      await qc.invalidateQueries({ queryKey: ["ml-vessel-picker"] });
       await qc.invalidateQueries({ queryKey: ["lighter-hulls-picker"] });
       onOpenChange(false);
     },

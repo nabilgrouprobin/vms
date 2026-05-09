@@ -90,8 +90,7 @@ export function TripsAssignLighterSheet({
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["trips-by-vessel-call", vesselCallId] });
       await qc.invalidateQueries({ queryKey: ["open-lighter-assignments", vesselCallId] });
-      await qc.invalidateQueries({ queryKey: ["trips-vessel-call-picker"] });
-      await qc.invalidateQueries({ queryKey: ["trips-lighter-hull-picker"] });
+      await qc.invalidateQueries({ queryKey: ["ml-vessel-picker"] });
       await qc.invalidateQueries({ queryKey: ["lighter-hulls-picker"] });
       onOpenChange(false);
     },

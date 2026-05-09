@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pencil, RotateCcw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDt } from "@/lib/format";
@@ -231,12 +232,16 @@ export function LaytimeSnapshotToolbar({
               <td className="px-3 py-2 text-muted-foreground">Laytime commence</td>
               <td className="px-3 py-2">
                 {editing ? (
-                  <Input
-                    type="datetime-local"
-                    className="h-9 max-w-xs font-mono text-xs"
-                    value={commenceLocal}
-                    onChange={(e) => setCommenceLocal(e.target.value)}
-                  />
+                  <div className="max-w-md space-y-1">
+                    <p className="text-[10px] text-muted-foreground">Local · 24-hour clock</p>
+                    <SofLocalDatetimeInputs
+                      className="max-w-xs"
+                      dateInputClassName="h-9 text-xs"
+                      timeInputClassName="h-9 text-xs"
+                      value={commenceLocal}
+                      onChange={setCommenceLocal}
+                    />
+                  </div>
                 ) : (
                   <span className="font-medium">{formatDt(snapshot.laytimeCommenceAt)}</span>
                 )}

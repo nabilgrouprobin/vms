@@ -204,7 +204,12 @@ export function MotherCallDischargeSection({
               for the same discharge workspace in the main menu.
             </p>
             <Button asChild>
-              <Link href={reportsDischargePath("mother", motherSofId)}>
+              <Link
+                href={reportsDischargePath("mother", {
+                  id: motherSofId,
+                  vesselCallId: vesselCallIdProp ?? vesselCallProp?.id ?? null
+                })}
+              >
                 Open discharge in Reports
               </Link>
             </Button>

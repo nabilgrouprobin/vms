@@ -2,13 +2,14 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Pencil, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { formatDt } from "@/lib/format";
 import { parseApiErr } from "@/lib/parse-api-error";
@@ -19,10 +20,19 @@ import {
   toDatetimeLocalValue
 } from "@/lib/sof-event-display";
 import { updateSofEvent, deleteSofEvent } from "@/lib/sof-api";
+import { VESSEL_SOF_CLEAR_SELECTION_EVENT } from "@/lib/workspace-paths";
 import type { SofEventListItem, SofEventTypeOption } from "@/types/vms";
 
 function rowTypeLabel(ev: SofEventListItem): string {
   return ev.eventTypeDefinition?.name ?? ev.eventTypeId;
+}
+
+/** Category from the event type definition (authoritative); falls back to `isHold` if missing. */
+function rowCategoryFromEventType(ev: SofEventListItem): { label: "Hold" | "Normal"; isHold: boolean } {
+  const cat = ev.eventTypeDefinition?.category;
+  if (cat === "HOLD_DELAY") return { label: "Hold", isHold: true };
+  if (cat === "NORMAL") return { label: "Normal", isHold: false };
+  return ev.isHold ? { label: "Hold", isHold: true } : { label: "Normal", isHold: false };
 }
 
 function escapeCsvCell(value: string): string {
@@ -66,7 +76,7 @@ type SofEventsTableProps = {
   eventsCsvBasename?: string;
   /** e.g. invalidate SOF detail after event CRUD */
   onEventsChanged?: () => void;
-  /** When false, hides Normal/Hold column (remarks stay in CSV). Default true. */
+  /** When false, hides the Category column (Hold vs Normal from event type). Default true. */
   showStatusColumn?: boolean;
   /**
    * When provided, gap rows render a "Fill gap" button that calls back with
@@ -89,6 +99,12 @@ export function SofEventsTable({
 }: SofEventsTableProps) {
   const qc = useQueryClient();
   const [edit, setEdit] = useState<SofEventListItem | null>(null);
+
+  useEffect(() => {
+    const onWorkspaceClear = () => setEdit(null);
+    window.addEventListener(VESSEL_SOF_CLEAR_SELECTION_EVENT, onWorkspaceClear);
+    return () => window.removeEventListener(VESSEL_SOF_CLEAR_SELECTION_EVENT, onWorkspaceClear);
+  }, []);
   const [editType, setEditType] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editStartTime, setEditStartTime] = useState("");
@@ -166,7 +182,7 @@ export function SofEventsTable({
       "Event ends at",
       "Length",
       "Type",
-      "Status",
+      "Category",
       "Created by",
       "Remarks",
       "ROB MT",
@@ -195,7 +211,7 @@ export function SofEventsTable({
         formatDt(row.toIso),
         row.durationLabel,
         rowTypeLabel(row.ev),
-        row.ev.isHold ? "Hold" : "Normal",
+        rowCategoryFromEventType(row.ev).label,
         row.ev.createdByUser.fullName,
         row.ev.remarks ?? "",
         row.ev.robQuantityMt ?? "",
@@ -270,7 +286,7 @@ export function SofEventsTable({
                     <th className="px-3 py-2 whitespace-nowrap">Length</th>
                     <th className="px-3 py-2 whitespace-nowrap">Type</th>
                     {showStatusColumn ? (
-                      <th className="px-3 py-2 whitespace-nowrap">Status</th>
+                      <th className="px-3 py-2 whitespace-nowrap">Category</th>
                     ) : null}
                     <th className="px-3 py-2 whitespace-nowrap">Created by</th>
                     <th className="px-3 py-2 min-w-[12rem]">Remarks</th>
@@ -337,7 +353,7 @@ export function SofEventsTable({
                         </td>
                         {showStatusColumn ? (
                           <td className="px-3 py-2 align-top whitespace-nowrap">
-                            {ev.isHold ? (
+                            {rowCategoryFromEventType(ev).isHold ? (
                               <span className="text-amber-600">Hold</span>
                             ) : (
                               <span className="text-muted-foreground">Normal</span>
@@ -385,7 +401,7 @@ export function SofEventsTable({
         </CardContent>
       </Card>
 
-      <Sheet open={edit !== null} onOpenChange={(o) => !o && setEdit(null)}>
+      <Sheet open={edit !== null} onOpenChange={(o) => !o && setEdit(null)} modal={false}>
         <SheetContent side="right" className="flex flex-col gap-4 overflow-y-auto">
           <div className="space-y-1.5 pr-8">
             <SheetTitle>Edit event</SheetTitle>
@@ -414,33 +430,26 @@ export function SofEventsTable({
                     : eventTypeOptions
                   ).map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} ({t.code})
+                      {t.name}
                     </option>
                   ))}
                 </select>
                 <p className="text-xs text-muted-foreground">
-                  Hold / delay is now controlled by the event type — pick a Hold/Delay type to flag
-                  this event as a hold automatically.
+                  Category follows the event type: choose a Hold type to flag this row as a hold, or
+                  a normal type otherwise.
                 </p>
               </div>
               <div className="space-y-2">
                 <Label>Event ends at</Label>
-                <Input
-                  type="datetime-local"
-                  value={editTime}
-                  onChange={(e) => setEditTime(e.target.value)}
-                />
+                <p className="text-xs text-muted-foreground">Local date and time · 24-hour clock.</p>
+                <SofLocalDatetimeInputs value={editTime} onChange={setEditTime} />
               </div>
               <div className="space-y-2">
                 <Label>Event starts at (optional)</Label>
-                <Input
-                  type="datetime-local"
-                  value={editStartTime}
-                  onChange={(e) => setEditStartTime(e.target.value)}
-                />
+                <SofLocalDatetimeInputs value={editStartTime} onChange={setEditStartTime} />
                 <p className="text-xs text-muted-foreground">
-                  Leave blank to keep this row as a point-in-time marker that chains from the
-                  previous row’s end.
+                  Leave the date empty to keep this row as a point-in-time marker that chains from
+                  the previous row’s end.
                 </p>
               </div>
               {editingIsHold ? (
