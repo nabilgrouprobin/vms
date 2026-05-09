@@ -9,12 +9,17 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CreateMasterSofEventTypeDto = void 0;
+exports.CreateMasterSofEventTypeDto = exports.SOF_EVENT_TYPE_CATEGORY = void 0;
 const client_1 = require("@prisma/client");
 const class_validator_1 = require("class-validator");
+exports.SOF_EVENT_TYPE_CATEGORY = {
+    NORMAL: "NORMAL",
+    HOLD_DELAY: "HOLD_DELAY"
+};
 class CreateMasterSofEventTypeDto {
     name;
     scope;
+    category;
 }
 exports.CreateMasterSofEventTypeDto = CreateMasterSofEventTypeDto;
 __decorate([
@@ -27,4 +32,9 @@ __decorate([
     (0, class_validator_1.IsEnum)(client_1.SofEventTypeScope),
     __metadata("design:type", String)
 ], CreateMasterSofEventTypeDto.prototype, "scope", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsIn)(["NORMAL", "HOLD_DELAY"]),
+    __metadata("design:type", String)
+], CreateMasterSofEventTypeDto.prototype, "category", void 0);
 //# sourceMappingURL=create-master-sof-event-type.dto.js.map

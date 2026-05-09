@@ -2,8 +2,8 @@
 
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import { useId } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,21 +11,21 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { cn } from "@/lib/utils";
 import type { SofEventTypeOption } from "@/types/vms";
 
-export type SofAddEventUserOption = { id: string; fullName: string; email: string };
+export type SofAddEventCurrentUser = { id: string; fullName: string; email: string | null };
 
 export type SofAddEventFields = {
   evType: string;
   setEvType: (v: string) => void;
+  /** datetime-local value (local time, no zone) for the event end. */
   evTime: string;
   setEvTime: (v: string) => void;
-  evDurationMinutes: string;
-  setEvDurationMinutes: (v: string) => void;
+  /** Optional explicit start time. When blank, backend chains from previous row end. */
+  evStartTime: string;
+  setEvStartTime: (v: string) => void;
   evRemarks: string;
   setEvRemarks: (v: string) => void;
-  evHold: boolean;
-  setEvHold: (v: boolean) => void;
-  evUser: string;
-  setEvUser: (v: string) => void;
+  evHoldReason: string;
+  setEvHoldReason: (v: string) => void;
   evErr: string | null;
 };
 
@@ -34,7 +34,7 @@ export function SofAddEventSheet({
   onOpenChange,
   description,
   fields,
-  users,
+  currentUser,
   eventTypes,
   typesLoading,
   typesError,
@@ -47,7 +47,7 @@ export function SofAddEventSheet({
   onOpenChange: (open: boolean) => void;
   description: string;
   fields: SofAddEventFields;
-  users: SofAddEventUserOption[];
+  currentUser: SofAddEventCurrentUser | null;
   eventTypes: SofEventTypeOption[];
   typesLoading?: boolean;
   typesError?: string | null;
@@ -57,24 +57,23 @@ export function SofAddEventSheet({
   isPending: boolean;
   saveDisabled?: boolean;
 }) {
-  const holdId = useId();
   const {
     evType,
     setEvType,
     evTime,
     setEvTime,
-    evDurationMinutes,
-    setEvDurationMinutes,
+    evStartTime,
+    setEvStartTime,
     evRemarks,
     setEvRemarks,
-    evHold,
-    setEvHold,
-    evUser,
-    setEvUser,
+    evHoldReason,
+    setEvHoldReason,
     evErr
   } = fields;
 
   const typesBusy = Boolean(typesLoading);
+  const selectedType = eventTypes.find((t) => t.id === evType) ?? null;
+  const selectedIsHold = selectedType?.category === "HOLD_DELAY";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -101,6 +100,16 @@ export function SofAddEventSheet({
                 </option>
               ))}
             </select>
+            {selectedType ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Category:</span>
+                {selectedIsHold ? (
+                  <Badge variant="warning">Hold / delay</Badge>
+                ) : (
+                  <span className="font-medium text-foreground">Normal</span>
+                )}
+              </div>
+            ) : null}
             {typesError ? <p className="text-xs text-destructive">{typesError}</p> : null}
             {manageHref ? (
               <p className="text-xs text-muted-foreground">
@@ -121,41 +130,45 @@ export function SofAddEventSheet({
             />
           </div>
           <div className="space-y-2">
-            <Label>Length (minutes)</Label>
+            <Label>Event starts at</Label>
             <Input
-              inputMode="numeric"
-              clearPlaceholderOnFocus
-              placeholder="Optional — e.g. 13 for thirteen minutes"
+              type="datetime-local"
               className="h-10 min-h-10"
-              value={evDurationMinutes}
-              onChange={(e) => setEvDurationMinutes(e.target.value)}
+              value={evStartTime}
+              onChange={(e) => setEvStartTime(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              Defaults to the previous event’s end time so the timeline chains automatically.
+              Adjust it to fill a gap or insert an event between existing rows. Clear it to chain
+              implicitly on the server.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Created by</Label>
-            <select
-              className="flex h-10 min-h-10 w-full rounded-md border border-input bg-card px-3 text-sm touch-manipulation"
-              value={evUser}
-              onChange={(e) => setEvUser(e.target.value)}
-            >
-              <option value="">Select user…</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.fullName} ({u.email})
-                </option>
-              ))}
-            </select>
+            <div className="flex h-10 min-h-10 w-full items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-foreground">
+              {currentUser ? (
+                <span className="truncate">
+                  {currentUser.fullName}
+                  {currentUser.email ? (
+                    <span className="text-muted-foreground"> ({currentUser.email})</span>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">Not signed in</span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 py-1">
-            <input
-              id={holdId}
-              type="checkbox"
-              className="size-4 touch-manipulation"
-              checked={evHold}
-              onChange={(e) => setEvHold(e.target.checked)}
-            />
-            <Label htmlFor={holdId}>Hold / delay</Label>
-          </div>
+          {selectedIsHold ? (
+            <div className="space-y-2">
+              <Label>Hold reason (optional)</Label>
+              <Input
+                value={evHoldReason}
+                onChange={(e) => setEvHoldReason(e.target.value)}
+                placeholder="e.g. weather, surveyor break, awaiting documents"
+                className="h-10 min-h-10"
+              />
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label>Remarks</Label>
             <textarea

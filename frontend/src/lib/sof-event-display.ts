@@ -25,6 +25,39 @@ function formatDurationFromTotalMinutes(totalMinutes: number): string {
 
 type SofEventWindowRow = Pick<SofEventListItem, "eventTime" | "durationHours" | "durationMinutes">;
 
+/** Resolve an event's window using ONLY its own duration (no chaining). */
+export function sofEventOwnWindow(row: SofEventWindowRow): {
+  fromIso: string | null;
+  toIso: string;
+  durationLabel: string;
+} {
+  const toMs = new Date(row.eventTime).getTime();
+  const dm = row.durationMinutes != null && row.durationMinutes > 0 ? row.durationMinutes : null;
+  if (dm !== null) {
+    return {
+      fromIso: new Date(toMs - dm * 60_000).toISOString(),
+      toIso: row.eventTime,
+      durationLabel: formatDurationFromTotalMinutes(dm)
+    };
+  }
+  const durH = parseHours(row.durationHours);
+  if (durH !== null && durH > 0) {
+    const fromMs = toMs - durH * 3_600_000;
+    const spanMins = Math.round((toMs - fromMs) / 60_000);
+    return {
+      fromIso: new Date(fromMs).toISOString(),
+      toIso: row.eventTime,
+      durationLabel: formatDurationFromTotalMinutes(spanMins)
+    };
+  }
+  return { fromIso: null, toIso: row.eventTime, durationLabel: "—" };
+}
+
+/** Format a millisecond span as "h h m min". Exposed for gap rows. */
+export function formatDurationSpanMs(ms: number): string {
+  return formatDurationFromTotalMinutes(Math.max(0, Math.round(ms / 60_000)));
+}
+
 /** ISO instant at event end; `durationMinutes` preferred; else `durationHours`; else gap from previous row end. */
 export function sofEventWindow(
   row: SofEventWindowRow,

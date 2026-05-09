@@ -1,11 +1,12 @@
 "use client";
 
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { TripsAssignLighterSheet } from "@/components/trips/trips-assign-lighter-sheet";
+import { TripsAssignMotherSheet } from "@/components/trips/trips-assign-mother-sheet";
 import { TripsTripActivitySheet } from "@/components/trips/trips-trip-activity-sheet";
 import { TripsTripEditSheet } from "@/components/trips/trips-trip-edit-sheet";
 import { Badge } from "@/components/ui/badge";
@@ -20,14 +21,15 @@ import {
   PickerEmptyState,
   PickerErrorState,
   PickerScrollArea,
-  SelectablePickerCard
+  SelectablePickerCard,
+  SelectedSofChip
 } from "@/components/workspace/mother-lighter-picker";
 import { getUserProfile } from "@/lib/auth-storage";
-import { fetchLighterTrips, fetchLighterVesselsForPicker } from "@/lib/lighter-trips-api";
+import { fetchLighterTrips, fetchLighterVesselsForPicker, patchLighterTrip } from "@/lib/lighter-trips-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { canEditLighterTrips } from "@/lib/trips-permissions";
 import { fetchVesselCall, fetchVesselCalls } from "@/lib/vessel-calls-api";
-import { tripsWorkspacePath } from "@/lib/workspace-paths";
+import { applySearchParams } from "@/lib/workspace-paths";
 import type {
   LighterTripListRow,
   LighterVesselPickerRow,
@@ -64,7 +66,9 @@ function tripsLighterPickerDetails(row: LighterVesselPickerRow): string {
 }
 
 function TripsWorkspaceInner() {
+  const qc = useQueryClient();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const kind: "mother" | "lighter" = searchParams.get("kind") === "lighter" ? "lighter" : "mother";
   const vesselCallId = searchParams.get("vesselCallId")?.trim() ?? "";
@@ -73,6 +77,7 @@ function TripsWorkspaceInner() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [assignOpen, setAssignOpen] = useState(false);
+  const [assignMotherOpen, setAssignMotherOpen] = useState(false);
   const [editTripId, setEditTripId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [activityTripId, setActivityTripId] = useState<string | null>(null);
@@ -87,19 +92,40 @@ function TripsWorkspaceInner() {
   }, [search]);
 
   const setKind = (next: "mother" | "lighter") => {
-    router.replace(tripsWorkspacePath(next));
+    router.replace(
+      applySearchParams(pathname, searchParams, {
+        kind: next,
+        vesselCallId: null,
+        lighterVesselId: null
+      }),
+      { scroll: false }
+    );
   };
 
   const selectMother = (id: string) => {
-    router.replace(tripsWorkspacePath("mother", { vesselCallId: id }));
+    router.replace(
+      applySearchParams(pathname, searchParams, {
+        kind: "mother",
+        vesselCallId: id,
+        lighterVesselId: null
+      }),
+      { scroll: false }
+    );
   };
 
   const selectLighter = (id: string) => {
-    router.replace(tripsWorkspacePath("lighter", { lighterVesselId: id }));
+    router.replace(
+      applySearchParams(pathname, searchParams, {
+        kind: "lighter",
+        lighterVesselId: id,
+        vesselCallId: null
+      }),
+      { scroll: false }
+    );
   };
 
   const clearSelection = () => {
-    router.replace(tripsWorkspacePath(kind));
+    router.replace(`/trips?kind=${kind}`, { scroll: false });
   };
 
   const motherQ = useInfiniteQuery({
@@ -196,6 +222,38 @@ function TripsWorkspaceInner() {
     ...invalidateForLighter,
     ["lighter-hulls-picker"]
   ];
+  const hasSelection = kind === "mother" ? !!vesselCallId : !!lighterVesselId;
+  const selectedMotherTitle = motherMetaQ.data
+    ? `${motherMetaQ.data.vessel.name}`
+    : vesselCallId
+      ? "Selected mother vessel"
+      : "";
+  const selectedMotherDetails = motherMetaQ.data
+    ? `${motherMetaQ.data.callNo} · ${motherMetaQ.data.status}${
+        motherMetaQ.data.cargoNameSnapshot ? ` · ${motherMetaQ.data.cargoNameSnapshot}` : ""
+      }`
+    : vesselCallId || "";
+  const selectedLighterTitle = lighterMetaQ.data?.name ?? (lighterVesselId ? "Selected lighter" : "");
+  const selectedLighterDetails = lighterMetaQ.data?.imoNo
+    ? `IMO ${lighterMetaQ.data.imoNo}`
+    : lighterVesselId || "";
+  const lighterIsFree = (lighterMetaQ.data?.activeTrip ?? null) == null;
+
+  const deleteM = useMutation({
+    mutationFn: (tripId: string) =>
+      patchLighterTrip(tripId, {
+        status: "CANCELLED",
+        statusChangeRemarks: "Trip cancelled from Trips workspace"
+      }),
+    onSuccess: async () => {
+      for (const key of invalidateForTripSheets) {
+        await qc.invalidateQueries({ queryKey: key });
+      }
+      await qc.invalidateQueries({ queryKey: ["trips-vessel-call-picker"] });
+      await qc.invalidateQueries({ queryKey: ["trips-lighter-hull-picker"] });
+      await qc.invalidateQueries({ queryKey: ["lighter-hulls-picker"] });
+    }
+  });
 
   return (
     <div className="w-full space-y-6">
@@ -203,68 +261,81 @@ function TripsWorkspaceInner() {
         <h1 className="text-2xl font-bold tracking-tight">Trips</h1>
         <p className="text-sm text-muted-foreground">
           {kind === "mother"
-            ? "Select a mother vessel call, then manage lighter trips and allocations for that call."
-            : "Select a lighter hull, then see which mother vessel call it is assigned to (one active trip at a time)."}
+            ? "One mother vessel can have many lighters. Add, edit, or delete lighter assignments here."
+            : "One lighter can work on only one mother vessel at a time. View past/current/next work and assign when free."}
         </p>
       </div>
 
-      <MotherLighterPickerCard
-        toolbar={
-          <MotherLighterPickerToolbar
-            kind={kind}
-            onKindChange={(next) => {
-              setSearch("");
-              setDebouncedSearch("");
-              setKind(next);
-            }}
-            search={search}
-            onSearchChange={setSearch}
-            placeholderMother="Search call no., vessel, cargo…"
-            placeholderLighter="Search lighter name, IMO…"
-          />
-        }
-        footer={kind === "mother" ? loadMoreMother : null}
-      >
-        <PickerScrollArea>
-          {pickerLoading ? (
-            <PickerCardSkeletonGrid />
-          ) : pickerFailed ? (
-            <PickerErrorState message={pickerErrMsg} />
-          ) : kind === "mother" ? (
-            motherRows.length === 0 ? (
-              <PickerEmptyState message="No mother vessel calls." />
+      {hasSelection ? (
+        <SelectedSofChip
+          kind={kind}
+          title={kind === "mother" ? selectedMotherTitle : selectedLighterTitle}
+          details={
+            (kind === "mother" ? selectedMotherDetails : selectedLighterDetails) || undefined
+          }
+          onChange={clearSelection}
+        />
+      ) : (
+        <MotherLighterPickerCard
+          toolbar={
+            <MotherLighterPickerToolbar
+              kind={kind}
+              onKindChange={(next) => {
+                setSearch("");
+                setDebouncedSearch("");
+                setKind(next);
+              }}
+              search={search}
+              onSearchChange={setSearch}
+              placeholderMother="Search call no., vessel, cargo…"
+              placeholderLighter="Search lighter name, IMO…"
+            />
+          }
+          footer={kind === "mother" ? loadMoreMother : null}
+        >
+          <PickerScrollArea>
+            {pickerLoading ? (
+              <PickerCardSkeletonGrid />
+            ) : pickerFailed ? (
+              <PickerErrorState message={pickerErrMsg} />
+            ) : kind === "mother" ? (
+              motherRows.length === 0 ? (
+                <PickerEmptyState message="No mother vessel calls." />
+              ) : (
+                <PickerCardGrid>
+                  {motherRows.map((row) => (
+                    <SelectablePickerCard
+                      key={row.id}
+                      title={tripsMotherPickerTitle(row)}
+                      details={tripsMotherPickerDetails(row)}
+                      selected={vesselCallId === row.id}
+                      onClick={() => selectMother(row.id)}
+                    />
+                  ))}
+                </PickerCardGrid>
+              )
             ) : (
-              <PickerCardGrid>
-                {motherRows.map((row) => (
-                  <SelectablePickerCard
-                    key={row.id}
-                    title={tripsMotherPickerTitle(row)}
-                    details={tripsMotherPickerDetails(row)}
-                    selected={vesselCallId === row.id}
-                    onClick={() => selectMother(row.id)}
-                  />
-                ))}
-              </PickerCardGrid>
-            )
-          ) : lighterRows.length === 0 ? (
-            <PickerEmptyState message="No lighter hulls match." />
-          ) : (
-            <PickerCardGrid>
-              {lighterRows.map((row: LighterVesselPickerRow) => (
-                <SelectablePickerCard
-                  key={row.id}
-                  title={tripsLighterPickerTitle(row)}
-                  details={tripsLighterPickerDetails(row)}
-                  selected={lighterVesselId === row.id}
-                  onClick={() => selectLighter(row.id)}
-                />
-              ))}
-            </PickerCardGrid>
-          )}
-        </PickerScrollArea>
-      </MotherLighterPickerCard>
+              lighterRows.length === 0 ? (
+                <PickerEmptyState message="No lighter hulls match." />
+              ) : (
+                <PickerCardGrid>
+                  {lighterRows.map((row: LighterVesselPickerRow) => (
+                    <SelectablePickerCard
+                      key={row.id}
+                      title={tripsLighterPickerTitle(row)}
+                      details={tripsLighterPickerDetails(row)}
+                      selected={lighterVesselId === row.id}
+                      onClick={() => selectLighter(row.id)}
+                    />
+                  ))}
+                </PickerCardGrid>
+              )
+            )}
+          </PickerScrollArea>
+        </MotherLighterPickerCard>
+      )}
 
-      {kind === "mother" && vesselCallId ? (
+      {!hasSelection ? null : kind === "mother" ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
@@ -289,9 +360,6 @@ function TripsWorkspaceInner() {
                   Assign lighter
                 </Button>
               ) : null}
-              <Button type="button" size="sm" variant="outline" onClick={clearSelection}>
-                Change selection
-              </Button>
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto">
@@ -304,6 +372,13 @@ function TripsWorkspaceInner() {
                 rows={tripsMotherQ.data?.data ?? []}
                 mode="mother"
                 canEdit={canEdit}
+                onDelete={(id) => {
+                  const ok = window.confirm(
+                    "Delete this assignment? This will cancel the trip and free the lighter when allowed."
+                  );
+                  if (!ok) return;
+                  void deleteM.mutate(id);
+                }}
                 onEdit={(id) => {
                   setEditTripId(id);
                   setEditOpen(true);
@@ -316,9 +391,7 @@ function TripsWorkspaceInner() {
             )}
           </CardContent>
         </Card>
-      ) : null}
-
-      {kind === "lighter" && lighterVesselId ? (
+      ) : kind === "lighter" && lighterVesselId ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
@@ -336,9 +409,16 @@ function TripsWorkspaceInner() {
                 <p className="text-sm text-destructive">Could not load this lighter hull.</p>
               )}
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={clearSelection}>
-              Change selection
-            </Button>
+            {canEdit ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setAssignMotherOpen(true)}
+                disabled={!lighterIsFree}
+              >
+                {lighterIsFree ? "Assign to mother vessel" : "Busy (finish current trip first)"}
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <p className="mb-4 text-sm text-muted-foreground">
@@ -355,6 +435,13 @@ function TripsWorkspaceInner() {
                 rows={tripsLighterQ.data?.data ?? []}
                 mode="lighter"
                 canEdit={canEdit}
+                onDelete={(id) => {
+                  const ok = window.confirm(
+                    "Delete this assignment? This will cancel the trip and free the lighter when allowed."
+                  );
+                  if (!ok) return;
+                  void deleteM.mutate(id);
+                }}
                 onEdit={(id) => {
                   setEditTripId(id);
                   setEditOpen(true);
@@ -375,6 +462,13 @@ function TripsWorkspaceInner() {
         onOpenChange={setAssignOpen}
         canEdit={canEdit}
         motherTitle={motherTitle}
+      />
+      <TripsAssignMotherSheet
+        lighterVesselId={lighterVesselId}
+        open={assignMotherOpen}
+        onOpenChange={setAssignMotherOpen}
+        canEdit={canEdit}
+        lighterTitle={selectedLighterTitle || "Selected lighter"}
       />
       <TripsTripEditSheet
         tripId={editTripId}
@@ -402,12 +496,14 @@ function TripsTable({
   rows,
   mode,
   canEdit,
+  onDelete,
   onEdit,
   onActivity
 }: {
   rows: LighterTripListRow[];
   mode: "mother" | "lighter";
   canEdit: boolean;
+  onDelete: (id: string) => void;
   onEdit: (id: string) => void;
   onActivity: (id: string) => void;
 }) {
@@ -443,6 +539,7 @@ function TripsTable({
         {rows.map((t) => {
           const locked = tripLocked(t.status);
           const done = ["UNLOADED", "CLOSED", "CANCELLED"].includes(t.status);
+          const canDelete = !done;
           return (
             <tr key={t.id} className="border-b border-border/80">
               <td className="py-2 pr-3 font-medium">{t.tripNo}</td>
@@ -491,6 +588,16 @@ function TripsTable({
                       >
                         Activity
                       </Button>
+                      {canDelete ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => onDelete(t.id)}
+                        >
+                          Delete
+                        </Button>
+                      ) : null}
                     </>
                   ) : locked ? (
                     <span className="text-xs text-muted-foreground">Closed — cannot edit</span>

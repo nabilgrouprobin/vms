@@ -84,12 +84,13 @@ export function SofDirectoryList({ variant }: { variant: Variant }) {
           errorApiHint: (
             <>
               Request base:{" "}
-              <code className="rounded bg-muted px-1 text-foreground">{getApiBase()}</code> (set{" "}
+              <code className="rounded bg-muted px-1 text-foreground">{getApiBase()}</code> (prefer{" "}
+              <code className="rounded bg-muted px-1">/api</code> via rewrite; optional{" "}
               <code className="rounded bg-muted px-1">NEXT_PUBLIC_API_URL</code> in{" "}
-              <code className="rounded bg-muted px-1">frontend/.env</code>, then restart{" "}
+              <code className="rounded bg-muted px-1">frontend/.env</code>), then restart{" "}
               <code className="rounded bg-muted px-1">npm run dev</code>). Backend default is{" "}
-              <code className="rounded bg-muted px-1">http://localhost:3000</code>; do not point the
-              API URL at the Next.js port (3001).
+              <code className="rounded bg-muted px-1">http://127.0.0.1:4000</code>; do not point the
+              API URL at the Next.js port.
             </>
           ),
           roleHint: (
@@ -112,11 +113,12 @@ export function SofDirectoryList({ variant }: { variant: Variant }) {
           errorApiHint: (
             <>
               Request base:{" "}
-              <code className="rounded bg-muted px-1 text-foreground">{getApiBase()}</code> (set{" "}
+              <code className="rounded bg-muted px-1 text-foreground">{getApiBase()}</code> (prefer{" "}
+              <code className="rounded bg-muted px-1">/api</code> via rewrite; optional{" "}
               <code className="rounded bg-muted px-1">NEXT_PUBLIC_API_URL</code> in{" "}
-              <code className="rounded bg-muted px-1">frontend/.env</code>, then restart{" "}
+              <code className="rounded bg-muted px-1">frontend/.env</code>), then restart{" "}
               <code className="rounded bg-muted px-1">npm run dev</code>). Backend default is{" "}
-              <code className="rounded bg-muted px-1">http://localhost:3000</code>.
+              <code className="rounded bg-muted px-1">http://127.0.0.1:4000</code>.
             </>
           ),
           roleHint: (

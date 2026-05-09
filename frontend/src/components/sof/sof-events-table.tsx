@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Trash2 } from "lucide-react";
+import { Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,9 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { formatDt } from "@/lib/format";
 import { parseApiErr } from "@/lib/parse-api-error";
 import {
+  formatDurationSpanMs,
+  sofEventOwnWindow,
   sortSofEventsChronoAsc,
-  sofEventWindow,
   toDatetimeLocalValue
 } from "@/lib/sof-event-display";
 import { updateSofEvent, deleteSofEvent } from "@/lib/sof-api";
@@ -31,6 +32,28 @@ function escapeCsvCell(value: string): string {
   return value;
 }
 
+/** Ignore sub-minute differences when scanning for gaps. */
+const GAP_MIN_MS = 60_000;
+
+type EventRow = {
+  kind: "event";
+  ev: SofEventListItem;
+  fromIso: string | null;
+  toIso: string;
+  durationLabel: string;
+};
+
+type GapRow = {
+  kind: "gap";
+  /** Stable id for React keys. */
+  id: string;
+  fromIso: string;
+  toIso: string;
+  durationLabel: string;
+};
+
+type DisplayRow = EventRow | GapRow;
+
 type SofEventsTableProps = {
   events: SofEventListItem[];
   /** Types shown when editing an event (same catalog as “Add event”). */
@@ -45,6 +68,11 @@ type SofEventsTableProps = {
   onEventsChanged?: () => void;
   /** When false, hides Normal/Hold column (remarks stay in CSV). Default true. */
   showStatusColumn?: boolean;
+  /**
+   * When provided, gap rows render a "Fill gap" button that calls back with
+   * the gap's [start, end] ISO strings. Hidden in read-only mode.
+   */
+  onFillGap?: (prefill: { startIso: string; endIso: string }) => void;
 };
 
 export function SofEventsTable({
@@ -56,47 +84,65 @@ export function SofEventsTable({
   footer,
   eventsCsvBasename,
   onEventsChanged,
-  showStatusColumn = true
+  showStatusColumn = true,
+  onFillGap
 }: SofEventsTableProps) {
   const qc = useQueryClient();
   const [edit, setEdit] = useState<SofEventListItem | null>(null);
   const [editType, setEditType] = useState("");
   const [editTime, setEditTime] = useState("");
-  const [editDurMinutes, setEditDurMinutes] = useState("");
-  const [editHold, setEditHold] = useState(false);
+  const [editStartTime, setEditStartTime] = useState("");
   const [editHoldReason, setEditHoldReason] = useState("");
   const [editRemarks, setEditRemarks] = useState("");
   const [editErr, setEditErr] = useState<string | null>(null);
 
   const sortedAsc = useMemo(() => sortSofEventsChronoAsc(events), [events]);
 
-  const rowsWithWindowsAsc = useMemo(() => {
-    let prevTo: string | null = null;
+  /** Per-row windows resolved from the event's own duration (no chaining). */
+  const ownWindowsAsc = useMemo<EventRow[]>(() => {
     return sortedAsc.map((ev) => {
-      const w = sofEventWindow(ev, prevTo);
-      prevTo = w.toIso;
-      return { ev, ...w };
+      const w = sofEventOwnWindow(ev);
+      return { kind: "event" as const, ev, ...w };
     });
   }, [sortedAsc]);
 
-  /** Newest first in the UI; windows are still derived in chronological order. */
-  const rowsWithWindows = useMemo(
-    () => [...rowsWithWindowsAsc].reverse(),
-    [rowsWithWindowsAsc]
-  );
+  /** Asc list with gap placeholders inserted between adjacent windows that don't touch. */
+  const displayAsc = useMemo<DisplayRow[]>(() => {
+    if (ownWindowsAsc.length === 0) return [];
+    const out: DisplayRow[] = [];
+    let prevEndMs: number | null = null;
+    for (let i = 0; i < ownWindowsAsc.length; i++) {
+      const row = ownWindowsAsc[i]!;
+      const currStartMs = row.fromIso
+        ? new Date(row.fromIso).getTime()
+        : new Date(row.toIso).getTime();
+      if (prevEndMs !== null && currStartMs - prevEndMs > GAP_MIN_MS) {
+        const fromIso = new Date(prevEndMs).toISOString();
+        const toIso = new Date(currStartMs).toISOString();
+        out.push({
+          kind: "gap",
+          id: `gap-${prevEndMs}-${currStartMs}`,
+          fromIso,
+          toIso,
+          durationLabel: formatDurationSpanMs(currStartMs - prevEndMs)
+        });
+      }
+      out.push(row);
+      const currEndMs = new Date(row.toIso).getTime();
+      prevEndMs = prevEndMs === null ? currEndMs : Math.max(prevEndMs, currEndMs);
+    }
+    return out;
+  }, [ownWindowsAsc]);
+
+  /** Newest first in the UI. */
+  const displayDesc = useMemo(() => [...displayAsc].reverse(), [displayAsc]);
 
   const openEdit = (ev: SofEventListItem) => {
     setEdit(ev);
     setEditType(ev.eventTypeId);
     setEditTime(toDatetimeLocalValue(ev.eventTime));
-    const mins =
-      ev.durationMinutes != null && ev.durationMinutes > 0
-        ? ev.durationMinutes
-        : ev.durationHours
-          ? Math.round(parseFloat(ev.durationHours) * 60)
-          : null;
-    setEditDurMinutes(mins != null && mins > 0 ? String(mins) : "");
-    setEditHold(ev.isHold);
+    const ownWindow = sofEventOwnWindow(ev);
+    setEditStartTime(ownWindow.fromIso ? toDatetimeLocalValue(ownWindow.fromIso) : "");
     setEditHoldReason(ev.holdReason ?? "");
     setEditRemarks(ev.remarks ?? "");
     setEditErr(null);
@@ -114,7 +160,7 @@ export function SofEventsTable({
   });
 
   const downloadCsv = () => {
-    if (!eventsCsvBasename || rowsWithWindowsAsc.length === 0) return;
+    if (!eventsCsvBasename || displayAsc.length === 0) return;
     const header = [
       "Event starts at",
       "Event ends at",
@@ -127,22 +173,38 @@ export function SofEventsTable({
       "Discharge MT",
       "Cumulative MT"
     ];
-    const lines = rowsWithWindowsAsc.map(({ ev, fromIso, toIso, durationLabel }) =>
-      [
-        fromIso ? formatDt(fromIso) : "",
-        formatDt(toIso),
-        durationLabel,
-        rowTypeLabel(ev),
-        ev.isHold ? "Hold" : "Normal",
-        ev.createdByUser.fullName,
-        ev.remarks ?? "",
-        ev.robQuantityMt ?? "",
-        ev.dischargeQuantityMt ?? "",
-        ev.cumulativeDischargeMt ?? ""
+    const lines = displayAsc.map((row) => {
+      if (row.kind === "gap") {
+        return [
+          formatDt(row.fromIso),
+          formatDt(row.toIso),
+          row.durationLabel,
+          "(gap)",
+          "Incomplete",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ]
+          .map((c) => escapeCsvCell(String(c)))
+          .join(",");
+      }
+      return [
+        row.fromIso ? formatDt(row.fromIso) : "",
+        formatDt(row.toIso),
+        row.durationLabel,
+        rowTypeLabel(row.ev),
+        row.ev.isHold ? "Hold" : "Normal",
+        row.ev.createdByUser.fullName,
+        row.ev.remarks ?? "",
+        row.ev.robQuantityMt ?? "",
+        row.ev.dischargeQuantityMt ?? "",
+        row.ev.cumulativeDischargeMt ?? ""
       ]
         .map((c) => escapeCsvCell(String(c)))
-        .join(",")
-    );
+        .join(",");
+    });
     const blob = new Blob([[header.join(","), ...lines].join("\r\n")], {
       type: "text/csv;charset=utf-8"
     });
@@ -162,6 +224,12 @@ export function SofEventsTable({
     },
     onError: (e) => alert(parseApiErr(e))
   });
+
+  const editingType = useMemo(
+    () => eventTypeOptions.find((t) => t.id === editType) ?? null,
+    [eventTypeOptions, editType]
+  );
+  const editingIsHold = editingType?.category === "HOLD_DELAY";
 
   return (
     <>
@@ -185,7 +253,7 @@ export function SofEventsTable({
           ) : null}
         </CardHeader>
         <CardContent className="space-y-3">
-          {rowsWithWindows.length === 0 ? (
+          {displayDesc.length === 0 ? (
             <p className="text-sm text-muted-foreground">No events yet.</p>
           ) : (
             <div className="rounded-md border border-border overflow-x-auto">
@@ -210,57 +278,105 @@ export function SofEventsTable({
                   </tr>
                 </thead>
                 <tbody>
-                  {rowsWithWindows.map(({ ev, fromIso, toIso, durationLabel }) => (
-                    <tr key={ev.id} className="border-b border-border last:border-0">
-                      <td className="px-3 py-2 align-top text-muted-foreground whitespace-nowrap">
-                        {fromIso ? formatDt(fromIso) : "—"}
-                      </td>
-                      <td className="px-3 py-2 align-top whitespace-nowrap">{formatDt(toIso)}</td>
-                      <td className="px-3 py-2 align-top whitespace-nowrap">{durationLabel}</td>
-                      <td className="px-3 py-2 align-top font-medium whitespace-nowrap">
-                        {rowTypeLabel(ev)}
-                      </td>
-                      {showStatusColumn ? (
-                        <td className="px-3 py-2 align-top whitespace-nowrap">
-                          {ev.isHold ? (
-                            <span className="text-amber-600">Hold</span>
-                          ) : (
-                            <span className="text-muted-foreground">Normal</span>
-                          )}
+                  {displayDesc.map((row) => {
+                    if (row.kind === "gap") {
+                      return (
+                        <tr
+                          key={row.id}
+                          className="border-b border-border last:border-0 border-l-4 border-l-destructive bg-destructive/10 text-destructive-foreground"
+                        >
+                          <td className="px-3 py-2 align-top whitespace-nowrap text-destructive">
+                            {formatDt(row.fromIso)}
+                          </td>
+                          <td className="px-3 py-2 align-top whitespace-nowrap text-destructive">
+                            {formatDt(row.toIso)}
+                          </td>
+                          <td className="px-3 py-2 align-top whitespace-nowrap text-destructive">
+                            {row.durationLabel}
+                          </td>
+                          <td
+                            className="px-3 py-2 align-top whitespace-nowrap font-medium text-destructive"
+                            colSpan={
+                              (showStatusColumn ? 1 : 0) +
+                              1 /* created by */ +
+                              1 /* remarks */ +
+                              1 /* type */
+                            }
+                          >
+                            Incomplete (gap) — fill or adjust adjacent events
+                          </td>
+                          <td className="px-3 py-2 align-top text-right whitespace-nowrap">
+                            {onFillGap ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+                                onClick={() =>
+                                  onFillGap({ startIso: row.fromIso, endIso: row.toIso })
+                                }
+                              >
+                                <Plus className="size-3.5" aria-hidden />
+                                Fill gap
+                              </Button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const { ev, fromIso, toIso, durationLabel } = row;
+                    return (
+                      <tr key={ev.id} className="border-b border-border last:border-0">
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-nowrap">
+                          {fromIso ? formatDt(fromIso) : "—"}
                         </td>
-                      ) : null}
-                      <td className="px-3 py-2 align-top text-muted-foreground whitespace-nowrap">
-                        {ev.createdByUser.fullName}
-                      </td>
-                      <td className="px-3 py-2 align-top text-[11px] leading-snug text-foreground whitespace-pre-wrap break-words max-w-[28rem]">
-                        {ev.remarks?.trim() ? ev.remarks : "—"}
-                      </td>
-                      <td className="px-3 py-2 align-top text-right whitespace-nowrap">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          disabled={readOnly}
-                          onClick={() => openEdit(ev)}
-                          aria-label="Edit event"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive"
-                          disabled={readOnly || delMut.isPending}
-                          onClick={() => {
-                            if (confirm("Delete this event?")) delMut.mutate(ev.id);
-                          }}
-                          aria-label="Delete event"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-3 py-2 align-top whitespace-nowrap">{formatDt(toIso)}</td>
+                        <td className="px-3 py-2 align-top whitespace-nowrap">{durationLabel}</td>
+                        <td className="px-3 py-2 align-top font-medium whitespace-nowrap">
+                          {rowTypeLabel(ev)}
+                        </td>
+                        {showStatusColumn ? (
+                          <td className="px-3 py-2 align-top whitespace-nowrap">
+                            {ev.isHold ? (
+                              <span className="text-amber-600">Hold</span>
+                            ) : (
+                              <span className="text-muted-foreground">Normal</span>
+                            )}
+                          </td>
+                        ) : null}
+                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-nowrap">
+                          {ev.createdByUser.fullName}
+                        </td>
+                        <td className="px-3 py-2 align-top text-[11px] leading-snug text-foreground whitespace-pre-wrap break-words max-w-[28rem]">
+                          {ev.remarks?.trim() ? ev.remarks : "—"}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            disabled={readOnly}
+                            onClick={() => openEdit(ev)}
+                            aria-label="Edit event"
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive"
+                            disabled={readOnly || delMut.isPending}
+                            onClick={() => {
+                              if (confirm("Delete this event?")) delMut.mutate(ev.id);
+                            }}
+                            aria-label="Delete event"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -291,8 +407,9 @@ export function SofEventsTable({
                           id: edit.eventTypeId,
                           code: edit.eventTypeDefinition.code,
                           name: `${edit.eventTypeDefinition.name} (inactive)`,
-                          scope: ""
-                        }
+                          scope: "",
+                          category: edit.isHold ? "HOLD_DELAY" : "NORMAL"
+                        } as SofEventTypeOption
                       ]
                     : eventTypeOptions
                   ).map((t) => (
@@ -301,6 +418,10 @@ export function SofEventsTable({
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  Hold / delay is now controlled by the event type — pick a Hold/Delay type to flag
+                  this event as a hold automatically.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Event ends at</Label>
@@ -311,35 +432,26 @@ export function SofEventsTable({
                 />
               </div>
               <div className="space-y-2">
-                <Label>Length (minutes)</Label>
+                <Label>Event starts at (optional)</Label>
                 <Input
-                  inputMode="numeric"
-                  clearPlaceholderOnFocus
-                  placeholder="Optional — whole minutes from From to To (e.g. 13)"
-                  value={editDurMinutes}
-                  onChange={(e) => setEditDurMinutes(e.target.value)}
+                  type="datetime-local"
+                  value={editStartTime}
+                  onChange={(e) => setEditStartTime(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Leave empty to chain from the previous row’s end time automatically.
+                  Leave blank to keep this row as a point-in-time marker that chains from the
+                  previous row’s end.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-hold"
-                  type="checkbox"
-                  checked={editHold}
-                  onChange={(e) => setEditHold(e.target.checked)}
-                />
-                <Label htmlFor="edit-hold">Hold / delay</Label>
-              </div>
-              <div className="space-y-2">
-                <Label>Hold reason</Label>
-                <Input
-                  value={editHoldReason}
-                  onChange={(e) => setEditHoldReason(e.target.value)}
-                  disabled={!editHold}
-                />
-              </div>
+              {editingIsHold ? (
+                <div className="space-y-2">
+                  <Label>Hold reason</Label>
+                  <Input
+                    value={editHoldReason}
+                    onChange={(e) => setEditHoldReason(e.target.value)}
+                  />
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label>Remarks</Label>
                 <textarea
@@ -367,27 +479,38 @@ export function SofEventsTable({
                       return;
                     }
                     if (!edit) return;
-                    const trimmed = editDurMinutes.trim();
-                    if (trimmed !== "") {
-                      const n = parseInt(trimmed, 10);
-                      if (!Number.isFinite(n) || n <= 0) {
-                        setEditErr("Duration must be a positive whole number of minutes");
+                    const endMs = new Date(editTime).getTime();
+                    if (!Number.isFinite(endMs)) {
+                      setEditErr("Invalid end time");
+                      return;
+                    }
+                    let durationPayload:
+                      | { durationMinutes: number; durationHours: null }
+                      | { durationMinutes: null; durationHours: null };
+                    if (editStartTime.trim() !== "") {
+                      const startMs = new Date(editStartTime).getTime();
+                      if (!Number.isFinite(startMs)) {
+                        setEditErr("Invalid start time");
                         return;
                       }
+                      if (startMs >= endMs) {
+                        setEditErr("Start time must be before end time");
+                        return;
+                      }
+                      durationPayload = {
+                        durationMinutes: Math.max(1, Math.round((endMs - startMs) / 60_000)),
+                        durationHours: null
+                      };
+                    } else {
+                      durationPayload = { durationMinutes: null, durationHours: null };
                     }
                     updMut.mutate({
                       eventId: edit.id,
                       body: {
                         eventTypeId: editType,
-                        eventTime: new Date(editTime).toISOString(),
-                        ...(trimmed === ""
-                          ? { durationMinutes: null, durationHours: null }
-                          : {
-                              durationMinutes: parseInt(trimmed, 10),
-                              durationHours: null
-                            }),
-                        isHold: editHold,
-                        holdReason: editHold ? editHoldReason || null : null,
+                        eventTime: new Date(endMs).toISOString(),
+                        ...durationPayload,
+                        holdReason: editingIsHold ? editHoldReason || null : null,
                         remarks: editRemarks.trim() === "" ? null : editRemarks
                       }
                     });

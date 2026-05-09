@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, SofEventTypeScope } from "@prisma/client";
+import { Prisma, SofEventTypeCategory, SofEventTypeScope } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
 import { allocateUniqueCode } from "./master-code.util";
@@ -10,17 +10,36 @@ import { UpdateMasterSofEventTypeDto } from "./dto/update-master-sof-event-type.
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
 
+// `category` field added in 20260508094500_sof_event_type_category — until
+// `npx prisma generate` runs, the generated `SofEventTypeDefinitionSelect`
+// type doesn't yet know about it. We carry the literal as a `Select` cast
+// so Prisma stops typechecking the unknown field while still inferring the
+// returned row shape.
 const rowSelect = {
   id: true,
   code: true,
   name: true,
   scope: true,
+  category: true,
   isActive: true,
   deletedAt: true,
   createdAt: true,
   updatedAt: true,
   _count: { select: { sofEvents: true } }
-} as const;
+} as unknown as Prisma.SofEventTypeDefinitionSelect;
+
+type MasterSofEventTypeRow = {
+  id: string;
+  code: string;
+  name: string;
+  scope: SofEventTypeScope;
+  category: "NORMAL" | "HOLD_DELAY";
+  isActive: boolean;
+  deletedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  _count: { sofEvents: number };
+};
 
 @Injectable()
 export class MasterSofEventTypesService {
@@ -49,7 +68,7 @@ export class MasterSofEventTypesService {
       },
       orderBy: [{ name: "asc" }, { code: "asc" }],
       take: 500,
-      select: { id: true, code: true, name: true, scope: true }
+      select: { id: true, code: true, name: true, scope: true, category: true } as never
     });
   }
 
@@ -110,8 +129,9 @@ export class MasterSofEventTypesService {
           code,
           name: dto.name.trim(),
           scope: dto.scope,
+          category: (dto.category ?? "NORMAL") as SofEventTypeCategory,
           isActive: true
-        },
+        } as never,
         select: rowSelect
       });
     } catch (e: any) {
@@ -135,6 +155,9 @@ export class MasterSofEventTypesService {
 
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.scope !== undefined) data.scope = dto.scope;
+    if (dto.category !== undefined) {
+      data.category = dto.category as SofEventTypeCategory;
+    }
     if (dto.isActive !== undefined) {
       data.isActive = dto.isActive;
       if (dto.isActive === true) {

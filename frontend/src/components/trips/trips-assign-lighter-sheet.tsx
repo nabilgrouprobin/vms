@@ -82,12 +82,11 @@ export function TripsAssignLighterSheet({
   }, [hullsQ.data, hullId]);
 
   const createM = useMutation({
-    mutationFn: () =>
-      createLighterTrip({
-        lighterAssignmentId: assignmentId!,
-        lighterVesselId: hullId!,
-        remarks: remarks.trim() || null
-      }),
+    mutationFn: (payload: {
+      vesselCallId: string;
+      lighterVesselId: string;
+      remarks?: string | null;
+    }) => createLighterTrip(payload),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["trips-by-vessel-call", vesselCallId] });
       await qc.invalidateQueries({ queryKey: ["open-lighter-assignments", vesselCallId] });
@@ -100,6 +99,18 @@ export function TripsAssignLighterSheet({
   });
 
   const assignments = assignmentsQ.data ?? [];
+  const effectiveAssignmentId = assignmentId ?? (assignments[0]?.id ?? null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (assignmentId && !assignments.some((a) => a.id === assignmentId)) {
+      setAssignmentId(null);
+      return;
+    }
+    if (!assignmentId && assignments.length > 0) {
+      setAssignmentId(assignments[0]!.id);
+    }
+  }, [open, assignments, assignmentId]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -118,7 +129,7 @@ export function TripsAssignLighterSheet({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto pr-1 pt-2">
             <section className="space-y-2">
-              <Label className="text-base">Open allocations (no trip yet)</Label>
+              <Label className="text-base">Open allocations (auto-selected)</Label>
               {assignmentsQ.isLoading ? (
                 <Skeleton className="h-24 w-full" />
               ) : assignmentsQ.isError ? (
@@ -224,28 +235,28 @@ export function TripsAssignLighterSheet({
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
             <p className="text-xs text-muted-foreground">
-              {!assignmentId && !hullId
-                ? "Create trip stays inactive until you select one open allocation and one available (not busy) lighter hull."
-                : !assignmentId
-                  ? "Select an open allocation above."
-                  : !hullId
-                    ? hullRows.length > 0 && hullRows.every((v) => v.activeTrip != null)
-                      ? "All hulls above are busy — search for another hull or free one by closing its trip."
-                      : "Select an available lighter hull above (rows marked Busy cannot be used)."
-                    : "Ready to create this trip."}
+              {!hullId
+                ? hullRows.length > 0 && hullRows.every((v) => v.activeTrip != null)
+                  ? "All hulls above are busy — search for another hull or free one by closing its trip."
+                  : "Select an available lighter hull above (rows marked Busy cannot be used)."
+                : "Ready to create this trip."}
             </p>
 
             <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-4">
               <Button
                 type="button"
-                disabled={!assignmentId || !hullId || createM.isPending}
+                disabled={!hullId || createM.isPending}
                 onClick={() => {
                   setError(null);
-                  if (!assignmentId || !hullId) {
-                    setError("Choose an allocation and a lighter hull.");
+                  if (!hullId) {
+                    setError("Choose a lighter hull.");
                     return;
                   }
-                  void createM.mutate();
+                  void createM.mutate({
+                    vesselCallId,
+                    lighterVesselId: hullId,
+                    remarks: remarks.trim() || null
+                  });
                 }}
               >
                 {createM.isPending ? "Creating…" : "Create trip"}

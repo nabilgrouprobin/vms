@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CreateLighterTripDto = void 0;
 class CreateLighterTripDto {
     lighterAssignmentId;
+    vesselCallId;
     lighterVesselId;
     remarks;
 }

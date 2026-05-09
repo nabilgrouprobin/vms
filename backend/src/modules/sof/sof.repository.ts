@@ -248,8 +248,16 @@ export class SofRepository {
   findActiveSofEventTypeDefinition(id: string) {
     return this.prisma.sofEventTypeDefinition.findFirst({
       where: { id, deletedAt: null, isActive: true },
-      select: { id: true, scope: true }
-    });
+      // `category` requires `npx prisma generate` after pulling this change.
+      select: { id: true, scope: true, category: true } as never
+    }) as Promise<
+      | {
+          id: string;
+          scope: import("@prisma/client").SofEventTypeScope;
+          category: "NORMAL" | "HOLD_DELAY";
+        }
+      | null
+    >;
   }
 
   listSofEvents(statementId: string, limit: number, cursor?: string) {
@@ -282,6 +290,36 @@ export class SofRepository {
     return this.prisma.sofEvent.create({
       data,
       select: this.getSofEventSelect()
+    });
+  }
+
+  /**
+   * Atomic three-step split:
+   *   1. Truncate the host event so it ends at the inserted event's start.
+   *   2. Create the inserted event.
+   *   3. If the host originally extended past the inserted event's end, clone the
+   *      host into a "continuation" event covering the tail.
+   * Returns the inserted event in the same shape as `createSofEvent`.
+   */
+  splitInsertSofEvent(args: {
+    hostId: string;
+    hostUpdate: Prisma.SofEventUncheckedUpdateInput;
+    insert: Prisma.SofEventUncheckedCreateInput;
+    continuation: Prisma.SofEventUncheckedCreateInput | null;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.sofEvent.update({
+        where: { id: args.hostId },
+        data: args.hostUpdate
+      });
+      const inserted = await tx.sofEvent.create({
+        data: args.insert,
+        select: this.getSofEventSelect()
+      });
+      if (args.continuation) {
+        await tx.sofEvent.create({ data: args.continuation });
+      }
+      return inserted;
     });
   }
 

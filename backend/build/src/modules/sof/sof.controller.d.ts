@@ -736,6 +736,7 @@ export declare class SofController {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;
@@ -1448,6 +1449,7 @@ export declare class SofController {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;
@@ -1569,6 +1571,7 @@ export declare class SofController {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;

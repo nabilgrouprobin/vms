@@ -62,7 +62,8 @@ export function fetchLighterTripDetail(id: string) {
 }
 
 export function createLighterTrip(body: {
-  lighterAssignmentId: string;
+  lighterAssignmentId?: string;
+  vesselCallId?: string;
   lighterVesselId: string;
   remarks?: string | null;
 }) {

@@ -13,10 +13,16 @@ export type SofDetailEventsTabPagination = {
   fetchNextPage: () => void;
 };
 
+/** Optional pre-fill passed to `onAddEvent` (e.g. when filling a gap row). */
+export type SofAddEventPrefill = {
+  startIso?: string | null;
+  endIso?: string | null;
+};
+
 type SofDetailEventsTabProps = {
   contextPanel: ReactNode;
   addEventDisabled: boolean;
-  onAddEvent: () => void;
+  onAddEvent: (prefill?: SofAddEventPrefill) => void;
   events: SofEventListItem[];
   eventTypeOptions: SofEventTypeOption[];
   readOnly: boolean;
@@ -52,7 +58,7 @@ export function SofDetailEventsTab({
           type="button"
           className="w-full gap-2 sm:w-auto"
           disabled={addEventDisabled}
-          onClick={onAddEvent}
+          onClick={() => onAddEvent()}
         >
           <Plus className="size-4" aria-hidden />
           Add event
@@ -67,6 +73,7 @@ export function SofDetailEventsTab({
         eventsCsvBasename={eventsCsvBasename}
         showStatusColumn={showStatusColumn}
         onEventsChanged={onEventsChanged}
+        onFillGap={addEventDisabled ? undefined : (prefill) => onAddEvent(prefill)}
         footer={
           hasNextPage ? (
             <Button

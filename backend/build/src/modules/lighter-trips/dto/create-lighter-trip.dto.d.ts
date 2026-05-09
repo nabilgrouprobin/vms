@@ -1,5 +1,6 @@
 export declare class CreateLighterTripDto {
-    lighterAssignmentId: string;
+    lighterAssignmentId?: string;
+    vesselCallId?: string;
     lighterVesselId: string;
     remarks?: string | null;
 }

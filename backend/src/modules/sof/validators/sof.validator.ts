@@ -88,40 +88,98 @@ export function sofEventDurationSpanMs(row: SofTimelineValidationRow): number | 
   return null;
 }
 
-export function validateSofEventTimelineNoGaps(rows: SofTimelineValidationRow[]): void {
+/**
+ * Same geometry as the frontend `sofEventWindow`: explicit duration wins; otherwise the
+ * period starts at the previous row's end time (chronological order).
+ */
+export function effectiveSofPeriodBoundsMs(
+  row: SofTimelineValidationRow,
+  previousRowEndMs: number | null
+): { startMs: number; endMs: number } | null {
+  const endMs = row.eventTime.getTime();
+  const spanMs = sofEventDurationSpanMs(row);
+  if (spanMs !== null && spanMs > 0) {
+    return { startMs: endMs - spanMs, endMs };
+  }
+  if (previousRowEndMs !== null && endMs > previousRowEndMs) {
+    return { startMs: previousRowEndMs, endMs };
+  }
+  return null;
+}
+
+export type SofSplitHostMatch = {
+  hostId: string;
+  hostStartMs: number;
+  hostEndMs: number;
+};
+
+/**
+ * When inserting [newStartMs, newEndMs], find the unique existing timeline row whose
+ * effective period strictly contains that interval (matches UI “slice inside this block”).
+ */
+export function findTimelineSplitHost(
+  timelineAsc: SofTimelineValidationRow[],
+  newStartMs: number,
+  newEndMs: number
+): SofSplitHostMatch | null {
+  let prevRowEndMs: number | null = null;
+  const matches: SofSplitHostMatch[] = [];
+  for (const r of timelineAsc) {
+    const b = effectiveSofPeriodBoundsMs(r, prevRowEndMs);
+    prevRowEndMs = r.eventTime.getTime();
+    if (!b || b.endMs <= b.startMs) continue;
+    const strictlyInside =
+      b.startMs <= newStartMs &&
+      newEndMs <= b.endMs &&
+      (b.startMs < newStartMs || newEndMs < b.endMs);
+    if (strictlyInside) {
+      matches.push({ hostId: r.id, hostStartMs: b.startMs, hostEndMs: b.endMs });
+    }
+  }
+  if (matches.length !== 1) return null;
+  return matches[0]!;
+}
+
+/**
+ * Block intersecting effective periods (explicit duration or chained), sorted by start.
+ */
+export function validateSofEventTimelineNoOverlap(rows: SofTimelineValidationRow[]): void {
   if (rows.length <= 1) {
     return;
   }
 
-  const sorted = [...rows].sort((a, b) => {
-    const byTime = a.eventTime.getTime() - b.eventTime.getTime();
-    if (byTime !== 0) {
-      return byTime;
-    }
-    return a.id.localeCompare(b.id);
-  });
+  const sorted = [...rows].sort(
+    (a, b) => a.eventTime.getTime() - b.eventTime.getTime() || a.id.localeCompare(b.id)
+  );
 
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const curr = sorted[i];
-    const prevEnd = prev.eventTime.getTime();
-    const currEnd = curr.eventTime.getTime();
-    const spanMs = sofEventDurationSpanMs(curr);
+  type Window = { id: string; startMs: number; endMs: number };
+  const windows: Window[] = [];
+  let prevRowEndMs: number | null = null;
+  for (const r of sorted) {
+    const b = effectiveSofPeriodBoundsMs(r, prevRowEndMs);
+    prevRowEndMs = r.eventTime.getTime();
+    if (!b || b.endMs <= b.startMs) continue;
+    windows.push({ id: r.id, startMs: b.startMs, endMs: b.endMs });
+  }
 
-    if (spanMs !== null) {
-      const currStart = currEnd - spanMs;
-      if (Math.abs(currStart - prevEnd) > SOF_TIMELINE_TOLERANCE_MS) {
-        throw new BadRequestException(
-          "SOF event times must be contiguous: when duration is set, the period start (event end minus duration) must equal the previous row end time. Record any intervening time as its own event or adjust duration so there is no gap (for example, a hold after a 3:00 end cannot use a 3:30 start with a half-hour duration to 4:00)."
-        );
-      }
-    } else if (currEnd + SOF_TIMELINE_TOLERANCE_MS < prevEnd) {
+  windows.sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+
+  for (let i = 1; i < windows.length; i++) {
+    const prev = windows[i - 1];
+    const curr = windows[i];
+    if (prev.endMs - curr.startMs > SOF_TIMELINE_TOLERANCE_MS) {
       throw new BadRequestException(
-        "SOF event times must be ordered: without duration, the event end cannot be before the previous row end time."
+        "SOF events cannot overlap: the event you are saving covers time that is already used by another event with a duration. Adjust the start/end times so the periods do not intersect."
       );
     }
   }
 }
+
+/**
+ * @deprecated Kept as a thin alias so existing callers keep compiling. Prefer
+ * `validateSofEventTimelineNoOverlap`, which permits out-of-order inserts.
+ */
+export const validateSofEventTimelineNoGaps = validateSofEventTimelineNoOverlap;
 
 export function validateSofStatusTransition(currentStatus: SOFStatus, nextStatus: SOFStatus): void {
   if (currentStatus === nextStatus) {

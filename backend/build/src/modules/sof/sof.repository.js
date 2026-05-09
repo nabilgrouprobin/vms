@@ -240,7 +240,7 @@ let SofRepository = class SofRepository {
     findActiveSofEventTypeDefinition(id) {
         return this.prisma.sofEventTypeDefinition.findFirst({
             where: { id, deletedAt: null, isActive: true },
-            select: { id: true, scope: true }
+            select: { id: true, scope: true, category: true }
         });
     }
     listSofEvents(statementId, limit, cursor) {
@@ -269,6 +269,22 @@ let SofRepository = class SofRepository {
         return this.prisma.sofEvent.create({
             data,
             select: this.getSofEventSelect()
+        });
+    }
+    splitInsertSofEvent(args) {
+        return this.prisma.$transaction(async (tx) => {
+            await tx.sofEvent.update({
+                where: { id: args.hostId },
+                data: args.hostUpdate
+            });
+            const inserted = await tx.sofEvent.create({
+                data: args.insert,
+                select: this.getSofEventSelect()
+            });
+            if (args.continuation) {
+                await tx.sofEvent.create({ data: args.continuation });
+            }
+            return inserted;
         });
     }
     updateSofEvent(id, data) {

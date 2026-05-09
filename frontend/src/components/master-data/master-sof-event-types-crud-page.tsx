@@ -31,7 +31,13 @@ import {
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { cn } from "@/lib/utils";
-import { SOF_EVENT_TYPE_SCOPES, type MasterSofEventTypeRow, type Paginated } from "@/types/vms";
+import {
+  SOF_EVENT_TYPE_CATEGORIES,
+  SOF_EVENT_TYPE_SCOPES,
+  type MasterSofEventTypeRow,
+  type Paginated,
+  type SofEventTypeCategoryUi
+} from "@/types/vms";
 
 type SofAdminScopeTab = "ALL" | "MOTHER_VESSEL" | "LIGHTER_VESSEL" | "BOTH";
 
@@ -54,6 +60,7 @@ export function MasterSofEventTypesCrudPage() {
 
   const [name, setName] = useState("");
   const [scope, setScope] = useState<string>("BOTH");
+  const [category, setCategory] = useState<SofEventTypeCategoryUi>("NORMAL");
   const [isActive, setIsActive] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -104,6 +111,7 @@ export function MasterSofEventTypesCrudPage() {
     setEditing(null);
     setName("");
     setScope(scopeTab === "ALL" ? "BOTH" : scopeTab);
+    setCategory("NORMAL");
     setIsActive(true);
     setSheetOpen(true);
   };
@@ -113,6 +121,7 @@ export function MasterSofEventTypesCrudPage() {
     setEditing(row);
     setName(row.name);
     setScope(row.scope);
+    setCategory(row.category ?? "NORMAL");
     setIsActive(row.isActive);
     setSheetOpen(true);
   };
@@ -122,18 +131,24 @@ export function MasterSofEventTypesCrudPage() {
       if (creating) {
         return createMasterSofEventType({
           name: name.trim(),
-          scope
+          scope,
+          category
         });
       }
       if (!editing) throw new Error("Nothing to save.");
       return patchMasterSofEventType(editing.id, {
         name: name.trim(),
         scope,
+        category,
         isActive
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (updated) => {
       await invalidatePickers();
+      await qc.refetchQueries({ queryKey: ["master-sof-event-types"] });
+      if (updated && typeof updated === "object" && "id" in updated) {
+        setEditing((prev) => (prev?.id === (updated as MasterSofEventTypeRow).id ? (updated as MasterSofEventTypeRow) : prev));
+      }
       setSheetOpen(false);
     },
     onError: (e: unknown) => setFormError(parseApiErr(e))
@@ -155,6 +170,8 @@ export function MasterSofEventTypesCrudPage() {
   });
 
   const fmtScope = (s: string) => s.replace(/_/g, " ");
+  const fmtCategory = (c: SofEventTypeCategoryUi) =>
+    c === "HOLD_DELAY" ? "Hold / delay" : "Normal";
 
   const scopeTabs: { id: SofAdminScopeTab; label: string }[] = [
     { id: "ALL", label: "All" },
@@ -266,6 +283,7 @@ export function MasterSofEventTypesCrudPage() {
                     <th className="px-3 py-2 font-medium">Code</th>
                     <th className="px-3 py-2 font-medium">Name</th>
                     <th className="px-3 py-2 font-medium">Scope</th>
+                    <th className="px-3 py-2 font-medium">Category</th>
                     <th className="px-3 py-2 font-medium">Events</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="min-w-[9rem] px-3 py-2 text-right font-medium">Actions</th>
@@ -277,6 +295,13 @@ export function MasterSofEventTypesCrudPage() {
                       <td className="px-3 py-2 font-mono text-xs">{row.code}</td>
                       <td className="px-3 py-2 font-medium">{row.name}</td>
                       <td className="px-3 py-2 text-muted-foreground">{fmtScope(row.scope)}</td>
+                      <td className="px-3 py-2">
+                        {row.category === "HOLD_DELAY" ? (
+                          <Badge variant="warning">Hold / delay</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">Normal</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-muted-foreground">{row._count.sofEvents}</td>
                       <td className="px-3 py-2">
                         {row.deletedAt ? (
@@ -390,6 +415,25 @@ export function MasterSofEventTypesCrudPage() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="set-category">Category</Label>
+            <select
+              id="set-category"
+              className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              value={category}
+              disabled={readOnly || Boolean(!creating && editing?.deletedAt)}
+              onChange={(e) => setCategory(e.target.value as SofEventTypeCategoryUi)}
+            >
+              {SOF_EVENT_TYPE_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {fmtCategory(c)}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Hold / delay flags every SOF event of this type as a hold automatically.
+            </p>
           </div>
 
           {!creating && editing?.deletedAt === null ? (

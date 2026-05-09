@@ -3,7 +3,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 
 import { SofDetailPageSkeleton } from "@/components/sof/sof-detail-page-skeleton";
@@ -18,11 +18,12 @@ import {
   PickerEmptyState,
   PickerErrorState,
   PickerScrollArea,
-  SelectablePickerCard
+  SelectablePickerCard,
+  SelectedSofChip
 } from "@/components/workspace/mother-lighter-picker";
 import type { VesselSofWorkspaceSection } from "@/components/sof/detail/types";
 import { fetchLighterSofs, fetchMotherSofs } from "@/lib/sof-api";
-import { reportsDischargePath, vesselSofWorkspacePath } from "@/lib/workspace-paths";
+import { applySearchParams, reportsDischargePath } from "@/lib/workspace-paths";
 import type { LighterSofListRow, MotherSofListRow, Paginated } from "@/types/vms";
 
 const MotherSofDetailView = dynamic(
@@ -68,13 +69,45 @@ function VesselSofWorkspaceScaffoldInner({
   reportsLinkBase?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const kind: "mother" | "lighter" = searchParams.get("kind") === "lighter" ? "lighter" : "mother";
   const id = searchParams.get("id")?.trim() ?? "";
   const [search, setSearch] = useState("");
 
-  const workspaceHref = (k: "mother" | "lighter", rowId: string | null) =>
-    reportsLinkBase ? reportsDischargePath(k, rowId) : vesselSofWorkspacePath(section, k, rowId);
+  /** List / header links without a selected SOF (same as clearing `id` on the current page). */
+  const listHref = useMemo(
+    () =>
+      reportsLinkBase
+        ? reportsDischargePath(kind, null)
+        : applySearchParams(pathname, searchParams, { id: null }),
+    [reportsLinkBase, kind, pathname, searchParams]
+  );
+
+  const setKind = (next: "mother" | "lighter") => {
+    if (reportsLinkBase) {
+      router.replace(reportsDischargePath(next, null), { scroll: false });
+      return;
+    }
+    router.replace(
+      applySearchParams(pathname, searchParams, {
+        kind: next,
+        ...(id ? { id } : { id: null })
+      }),
+      { scroll: false }
+    );
+  };
+
+  const pick = (rowId: string) => {
+    router.replace(
+      applySearchParams(pathname, searchParams, { kind, id: rowId }),
+      { scroll: false }
+    );
+  };
+
+  const clearSelection = () => {
+    router.replace(applySearchParams(pathname, searchParams, { id: null }), { scroll: false });
+  };
 
   const listQ = useInfiniteQuery({
     queryKey: [
@@ -95,17 +128,11 @@ function VesselSofWorkspaceScaffoldInner({
 
   const rows = useMemo(() => listQ.data?.pages.flatMap((p) => p.data) ?? [], [listQ.data]);
 
-  const setKind = (next: "mother" | "lighter") => {
-    router.replace(
-      reportsLinkBase
-        ? reportsDischargePath(next, null)
-        : vesselSofWorkspacePath(section, next, id || null)
-    );
-  };
-
-  const pick = (rowId: string) => {
-    router.replace(workspaceHref(kind, rowId));
-  };
+  /** Selected SOF row, if it happens to be in the currently loaded page. */
+  const selectedRow = useMemo(
+    () => (id ? rows.find((r) => r.id === id) ?? null : null),
+    [rows, id]
+  );
 
   const sectionTitle =
     section === "overview"
@@ -128,56 +155,70 @@ function VesselSofWorkspaceScaffoldInner({
     </Button>
   ) : null;
 
+  const selectedChipTitle = selectedRow?.sofNo ?? "Selected SOF";
+  const selectedChipDetails = selectedRow ? sofPickerDetails(kind, selectedRow) : "";
+
   return (
     <div className="w-full space-y-6">
-      <MotherLighterPickerCard
-        toolbar={
-          <MotherLighterPickerToolbar
-            kind={kind}
-            onKindChange={setKind}
-            search={search}
-            onSearchChange={setSearch}
-            placeholderMother="Search mother SOF…"
-            placeholderLighter="Search lighter SOF…"
-            trailing={
-              <Button variant="outline" size="sm" className="w-full lg:w-auto" asChild>
-                <Link href={kind === "mother" ? "/mother-sof/new" : "/lighter-sof/new"}>
-                  New {kind === "mother" ? "mother" : "lighter"} SOF
-                </Link>
-              </Button>
-            }
-          />
-        }
-        footer={loadMoreFooter}
-      >
-        <PickerScrollArea>
-          {listQ.isLoading ? (
-            <PickerCardSkeletonGrid />
-          ) : listQ.isError ? (
-            <PickerErrorState message="Could not load the list." />
-          ) : rows.length === 0 ? (
-            <PickerEmptyState message="No matches." />
-          ) : (
-            <PickerCardGrid>
-              {rows.map((r) => (
-                <SelectablePickerCard
-                  key={r.id}
-                  title={r.sofNo}
-                  details={sofPickerDetails(kind, r)}
-                  selected={id === r.id}
-                  onClick={() => pick(r.id)}
-                />
-              ))}
-            </PickerCardGrid>
-          )}
-        </PickerScrollArea>
-      </MotherLighterPickerCard>
+      {id ? (
+        <SelectedSofChip
+          kind={kind}
+          title={selectedChipTitle}
+          details={selectedChipDetails || undefined}
+          onChange={clearSelection}
+        />
+      ) : (
+        <MotherLighterPickerCard
+          toolbar={
+            <MotherLighterPickerToolbar
+              kind={kind}
+              onKindChange={setKind}
+              search={search}
+              onSearchChange={setSearch}
+              placeholderMother="Search mother SOF…"
+              placeholderLighter="Search lighter SOF…"
+              trailing={
+                <Button variant="outline" size="sm" className="w-full lg:w-auto" asChild>
+                  <Link href={kind === "mother" ? "/mother-sof/new" : "/lighter-sof/new"}>
+                    New {kind === "mother" ? "mother" : "lighter"} SOF
+                  </Link>
+                </Button>
+              }
+            />
+          }
+          footer={loadMoreFooter}
+        >
+          <PickerScrollArea>
+            {listQ.isLoading ? (
+              <PickerCardSkeletonGrid />
+            ) : listQ.isError ? (
+              <PickerErrorState message="Could not load the list." />
+            ) : rows.length === 0 ? (
+              <PickerEmptyState message="No matches." />
+            ) : (
+              <PickerCardGrid>
+                {rows.map((r) => (
+                  <SelectablePickerCard
+                    key={r.id}
+                    title={r.sofNo}
+                    details={sofPickerDetails(kind, r)}
+                    selected={id === r.id}
+                    onClick={() => pick(r.id)}
+                  />
+                ))}
+              </PickerCardGrid>
+            )}
+          </PickerScrollArea>
+        </MotherLighterPickerCard>
+      )}
 
       <div className="w-full min-w-0 space-y-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{sectionTitle}</h1>
           <p className="text-sm text-muted-foreground">
-            Pick a statement of facts above to work on {sectionTitle.toLowerCase()} for that record.
+            {id
+              ? `Showing ${sectionTitle.toLowerCase()} for the selected SOF — use “Change SOF” above to pick a different one.`
+              : `Pick a statement of facts above to work on ${sectionTitle.toLowerCase()} for that record.`}
           </p>
         </div>
 
@@ -185,14 +226,14 @@ function VesselSofWorkspaceScaffoldInner({
           kind === "mother" ? (
             <MotherSofDetailView
               id={id}
-              listHref={workspaceHref(kind, null)}
+              listHref={listHref}
               workspaceSection={section}
               hideWorkspaceChrome
             />
           ) : (
             <LighterSofDetailView
               id={id}
-              listHref={workspaceHref(kind, null)}
+              listHref={listHref}
               workspaceSection={section}
               hideWorkspaceChrome
             />

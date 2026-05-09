@@ -20,10 +20,12 @@ import { UpdateMotherVesselSofDto } from "./dto/update-mother-vessel-sof.dto";
 import { UpdateSofEventDto } from "./dto/update-sof-event.dto";
 import { PaginatedResult } from "./types/sof.types";
 import {
+  findTimelineSplitHost,
   parseLimit,
   parseOptionalDate,
   parseRequiredDate,
-  validateSofEventTimelineNoGaps,
+  sofEventDurationSpanMs,
+  validateSofEventTimelineNoOverlap,
   validateSofStatusTransition
 } from "./validators/sof.validator";
 import { LaytimeCalculationService } from "./laytime/laytime-calculation.service";
@@ -398,7 +400,120 @@ export class SofService {
     const eventTime = parseRequiredDate(dto.eventTime, "eventTime");
     const { outMinutes, outHours } = this.resolveSofDurationForCreate(dto);
     const timeline = await this.sofRepository.listSofEventsTimelineForValidation(statementId);
-    validateSofEventTimelineNoGaps([
+
+    // Hold/Delay is now driven by the master event type's `category`.
+    const derivedIsHold = eventTypeDef.category === "HOLD_DELAY";
+
+    const baseInsert = this.removeUndefined({
+      statementId,
+      eventTypeId: dto.eventTypeId,
+      eventTime,
+      durationHours: outHours,
+      durationMinutes: outMinutes,
+      countsAsLaytime: dto.countsAsLaytime ?? true,
+      laytimeImpactHours: this.toDecimal(dto.laytimeImpactHours),
+      location: dto.location,
+      anchorageId: dto.anchorageId,
+      robQuantityMt: this.toDecimal(dto.robQuantityMt),
+      dischargeQuantityMt: this.toDecimal(dto.dischargeQuantityMt),
+      cumulativeDischargeMt: this.toDecimal(dto.cumulativeDischargeMt),
+      isHold: derivedIsHold,
+      holdReason: derivedIsHold ? dto.holdReason : null,
+      responsibleParty: dto.responsibleParty,
+      laytimeAccount: dto.laytimeAccount,
+      referenceNo: dto.referenceNo,
+      remarks: dto.remarks,
+      supportingDocuments: dto.supportingDocuments ?? [],
+      createdBy: dto.createdBy,
+      verifiedBy: dto.verifiedBy,
+      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
+      operationBatchId: dto.operationBatchId
+    }) as Prisma.SofEventUncheckedCreateInput;
+
+    // If the inserted event has explicit start/end and falls strictly inside one
+    // existing event with its own duration, automatically split the host event
+    // around the insertion (truncate host + create insert + create continuation).
+    const splitPlan = this.planSofEventInsertSplit({
+      timeline,
+      newEnd: eventTime,
+      newDurationMinutes: outMinutes ?? null,
+      newDurationHours: outHours ?? null
+    });
+
+    if (splitPlan) {
+      const host = await this.sofRepository.findSofEvent(splitPlan.hostId);
+      if (!host) {
+        throw new BadRequestException(
+          "Could not split the surrounding event: host event was not found. Refresh and try again."
+        );
+      }
+
+      const hostStoresMinutes =
+        host.durationMinutes !== null && host.durationMinutes !== undefined && host.durationMinutes > 0;
+      const hostStoresHoursOnly =
+        !hostStoresMinutes &&
+        host.durationHours !== null &&
+        Number(host.durationHours) > 0;
+
+      const hostUpdate: Prisma.SofEventUncheckedUpdateInput = {
+        eventTime: new Date(splitPlan.newStartMs),
+        ...(hostStoresMinutes
+          ? { durationMinutes: splitPlan.hostNewDurationMinutes, durationHours: null }
+          : hostStoresHoursOnly
+            ? {
+                durationHours: new Prisma.Decimal(splitPlan.hostNewDurationMinutes / 60),
+                durationMinutes: null
+              }
+            : {
+                durationMinutes: splitPlan.hostNewDurationMinutes,
+                durationHours: null
+              })
+      };
+
+      const continuationUsesMinutes = hostStoresMinutes || !hostStoresHoursOnly;
+
+      let continuation: Prisma.SofEventUncheckedCreateInput | null = null;
+      if (splitPlan.continuationDurationMinutes > 0) {
+        continuation = this.removeUndefined({
+          statementId: host.statementId,
+          eventTypeId: host.eventTypeId,
+          eventTime: new Date(splitPlan.hostOriginalEndMs),
+          ...(continuationUsesMinutes
+            ? {
+                durationMinutes: splitPlan.continuationDurationMinutes,
+                durationHours: null
+              }
+            : {
+                durationHours: new Prisma.Decimal(
+                  splitPlan.continuationDurationMinutes / 60
+                ),
+                durationMinutes: null
+              }),
+          countsAsLaytime: host.countsAsLaytime,
+          laytimeImpactHours: host.laytimeImpactHours,
+          location: host.location,
+          anchorageId: host.anchorageId,
+          isHold: host.isHold,
+          holdReason: host.holdReason,
+          responsibleParty: host.responsibleParty,
+          laytimeAccount: host.laytimeAccount,
+          referenceNo: host.referenceNo,
+          remarks: host.remarks,
+          supportingDocuments: host.supportingDocuments ?? [],
+          createdBy: dto.createdBy,
+          operationBatchId: host.operationBatchId
+        }) as Prisma.SofEventUncheckedCreateInput;
+      }
+
+      return this.sofRepository.splitInsertSofEvent({
+        hostId: host.id,
+        hostUpdate,
+        insert: baseInsert,
+        continuation
+      });
+    }
+
+    validateSofEventTimelineNoOverlap([
       ...timeline.map((r) => ({
         id: r.id,
         eventTime: r.eventTime,
@@ -413,33 +528,66 @@ export class SofService {
       }
     ]);
 
-    return this.sofRepository.createSofEvent(
-      this.removeUndefined({
-        statementId,
-        eventTypeId: dto.eventTypeId,
-        eventTime,
-        durationHours: outHours,
-        durationMinutes: outMinutes,
-        countsAsLaytime: dto.countsAsLaytime ?? true,
-        laytimeImpactHours: this.toDecimal(dto.laytimeImpactHours),
-        location: dto.location,
-        anchorageId: dto.anchorageId,
-        robQuantityMt: this.toDecimal(dto.robQuantityMt),
-        dischargeQuantityMt: this.toDecimal(dto.dischargeQuantityMt),
-        cumulativeDischargeMt: this.toDecimal(dto.cumulativeDischargeMt),
-        isHold: dto.isHold ?? false,
-        holdReason: dto.holdReason,
-        responsibleParty: dto.responsibleParty,
-        laytimeAccount: dto.laytimeAccount,
-        referenceNo: dto.referenceNo,
-        remarks: dto.remarks,
-        supportingDocuments: dto.supportingDocuments ?? [],
-        createdBy: dto.createdBy,
-        verifiedBy: dto.verifiedBy,
-        verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
-        operationBatchId: dto.operationBatchId
-      }) as Prisma.SofEventUncheckedCreateInput
+    return this.sofRepository.createSofEvent(baseInsert);
+  }
+
+  /**
+   * Detect "strict containment" on insert: the new event's [start, end) sits
+   * entirely inside exactly one existing event's [start, end) and at least one
+   * boundary differs. Returns the split plan, or `null` when the normal
+   * non-overlap validation should run instead.
+   */
+  private planSofEventInsertSplit(args: {
+    timeline: Array<{
+      id: string;
+      eventTime: Date;
+      durationHours: Prisma.Decimal | null | undefined;
+      durationMinutes: number | null | undefined;
+    }>;
+    newEnd: Date;
+    newDurationMinutes: number | null | undefined;
+    newDurationHours: Prisma.Decimal | null | undefined;
+  }): {
+    hostId: string;
+    newStartMs: number;
+    hostOriginalEndMs: number;
+    hostNewDurationMinutes: number;
+    continuationDurationMinutes: number;
+  } | null {
+    const span = sofEventDurationSpanMs({
+      id: "new",
+      eventTime: args.newEnd,
+      durationHours: args.newDurationHours ?? null,
+      durationMinutes: args.newDurationMinutes ?? null
+    });
+    if (span === null || span <= 0) return null;
+    const newEndMs = args.newEnd.getTime();
+    const newStartMs = newEndMs - span;
+
+    const sortedTimeline = [...args.timeline].sort(
+      (a, b) =>
+        a.eventTime.getTime() - b.eventTime.getTime() || a.id.localeCompare(b.id)
     );
+
+    const hostMatch = findTimelineSplitHost(sortedTimeline, newStartMs, newEndMs);
+    if (!hostMatch) return null;
+
+    const hostNewDurationMinutes = Math.max(
+      1,
+      Math.round((newStartMs - hostMatch.hostStartMs) / 60_000)
+    );
+    const continuationDurationMinutes = Math.max(
+      0,
+      Math.round((hostMatch.hostEndMs - newEndMs) / 60_000)
+    );
+
+    return {
+      hostId: hostMatch.hostId,
+      newStartMs,
+      hostOriginalEndMs: hostMatch.hostEndMs,
+      hostNewDurationMinutes,
+      continuationDurationMinutes
+    };
   }
 
   async updateSofEvent(eventId: string, dto: UpdateSofEventDto) {
@@ -455,12 +603,16 @@ export class SofService {
       throw new ConflictException("Closed SOF records cannot be edited");
     }
 
+    let derivedIsHold: boolean | undefined;
+    let nextEventTypeCategory: "NORMAL" | "HOLD_DELAY" | undefined;
     if (dto.eventTypeId !== undefined) {
       const eventTypeDef = await this.sofRepository.findActiveSofEventTypeDefinition(dto.eventTypeId);
       if (!eventTypeDef) {
         throw new BadRequestException("SOF event type was not found or is inactive");
       }
       this.assertSofEventTypeMatchesScope(eventTypeDef.scope, sof.scope);
+      nextEventTypeCategory = eventTypeDef.category;
+      derivedIsHold = eventTypeDef.category === "HOLD_DELAY";
     }
 
     const nextEventTime = dto.eventTime
@@ -469,7 +621,7 @@ export class SofService {
     const { nextMinutes, nextHours } = this.resolveSofDurationForUpdate(event, dto);
 
     const timeline = await this.sofRepository.listSofEventsTimelineForValidation(event.statementId);
-    validateSofEventTimelineNoGaps(
+    validateSofEventTimelineNoOverlap(
       timeline.map((r) =>
         r.id === eventId
           ? {
@@ -502,8 +654,15 @@ export class SofService {
         robQuantityMt: this.toNullableDecimal(dto.robQuantityMt),
         dischargeQuantityMt: this.toNullableDecimal(dto.dischargeQuantityMt),
         cumulativeDischargeMt: this.toNullableDecimal(dto.cumulativeDischargeMt),
-        isHold: dto.isHold,
-        holdReason: dto.holdReason,
+        // When the event type changes we recompute hold from the new type's
+        // category. Otherwise leave the column untouched.
+        isHold: derivedIsHold,
+        holdReason:
+          nextEventTypeCategory === "NORMAL"
+            ? null
+            : nextEventTypeCategory === "HOLD_DELAY"
+              ? dto.holdReason
+              : dto.holdReason,
         responsibleParty: dto.responsibleParty,
         laytimeAccount: dto.laytimeAccount,
         referenceNo: dto.referenceNo,

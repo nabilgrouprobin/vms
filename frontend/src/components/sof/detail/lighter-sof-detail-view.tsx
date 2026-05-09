@@ -7,14 +7,14 @@ import { useEffect, useId, useMemo, useState } from "react";
 
 import {
   SofAddEventSheet,
-  type SofAddEventFields,
-  type SofAddEventUserOption
+  type SofAddEventCurrentUser,
+  type SofAddEventFields
 } from "@/components/sof/detail/sof-add-event-sheet";
 import { SofDetailHeader } from "@/components/sof/detail/sof-detail-header";
 import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-tab";
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
-import { useSofOptionsQuery } from "@/hooks/use-sof-options";
+import { getUserProfile } from "@/lib/auth-storage";
 import {
   ImportContractLaytimeForm,
   VesselCallImportContractLinkPanel
@@ -38,6 +38,7 @@ import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
 import {
   flatSofEventInfinitePages,
   latestSofEventMetrics,
+  toDatetimeLocalValue as toLocalDtInput,
   type SofEventInfinitePages
 } from "@/lib/sof-event-display";
 import { fetchSofEventTypeOptions } from "@/lib/master-data-api";
@@ -109,8 +110,6 @@ export function LighterSofDetailView({
     queryFn: () => fetchLighterSof(id),
     enabled: !!id
   });
-
-  const optionsQ = useSofOptionsQuery();
 
   const eventTypesQ = useQuery({
     queryKey: ["sof-event-type-options", "LIGHTER_VESSEL"],
@@ -184,18 +183,37 @@ export function LighterSofDetailView({
 
   const [evType, setEvType] = useState("");
   const [evTime, setEvTime] = useState("");
-  const [evDurationMinutes, setEvDurationMinutes] = useState("");
+  const [evStartTime, setEvStartTime] = useState("");
   const [evRemarks, setEvRemarks] = useState("");
-  const [evHold, setEvHold] = useState(false);
-  const [evUser, setEvUser] = useState("");
+  const [evHoldReason, setEvHoldReason] = useState("");
   const [evErr, setEvErr] = useState<string | null>(null);
   const [addEventOpen, setAddEventOpen] = useState(false);
+
+  const currentUser = useMemo<SofAddEventCurrentUser | null>(() => {
+    const p = getUserProfile();
+    return p ? { id: p.id, fullName: p.fullName, email: p.email } : null;
+  }, []);
 
   useEffect(() => {
     const list = eventTypesQ.data;
     if (!list?.length) return;
     setEvType((prev) => (prev && list.some((t) => t.id === prev) ? prev : list[0].id));
   }, [eventTypesQ.data]);
+
+  const openAddEvent = (prefill?: { startIso?: string | null; endIso?: string | null }) => {
+    setEvErr(null);
+    setEvHoldReason("");
+    if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
+    if (prefill?.startIso !== undefined) {
+      setEvStartTime(prefill.startIso ? toLocalDtInput(prefill.startIso) : "");
+    } else {
+      // Default the new event's start to the most recent event's end so the user
+      // sees the natural chain point and can still adjust it before saving.
+      const lastEnd = latestEventMetrics?.eventTime ?? null;
+      setEvStartTime(lastEnd ? toLocalDtInput(lastEnd) : "");
+    }
+    setAddEventOpen(true);
+  };
 
   const [layRecalc, setLayRecalc] = useState<{
     breakdown: LaytimeBreakdown;
@@ -232,29 +250,37 @@ export function LighterSofDetailView({
 
   const addEvMut = useMutation({
     mutationFn: () => {
-      if (!evUser) throw new Error("Select a user (created by)");
+      if (!currentUser?.id) throw new Error("You must be signed in to record events");
       if (!evType) throw new Error("Select an event type");
-      const t = evTime ? new Date(evTime).toISOString() : new Date().toISOString();
-      const dm = evDurationMinutes.trim();
-      if (dm !== "") {
-        const n = parseInt(dm, 10);
-        if (!Number.isFinite(n) || n <= 0) {
-          throw new Error("Duration must be a positive whole number of minutes");
-        }
+      if (!evTime) throw new Error("Set the event end time");
+      const endMs = new Date(evTime).getTime();
+      if (!Number.isFinite(endMs)) throw new Error("Invalid end time");
+      let durationMinutes: number | undefined;
+      if (evStartTime.trim() !== "") {
+        const startMs = new Date(evStartTime).getTime();
+        if (!Number.isFinite(startMs)) throw new Error("Invalid start time");
+        if (startMs >= endMs) throw new Error("Start time must be before end time");
+        durationMinutes = Math.max(1, Math.round((endMs - startMs) / 60_000));
       }
+      const selectedType = eventTypesQ.data?.find((t) => t.id === evType) ?? null;
+      const isHold = selectedType?.category === "HOLD_DELAY";
       return createLighterSofEvent(id, {
         eventTypeId: evType,
-        eventTime: t,
-        ...(dm === "" ? {} : { durationMinutes: parseInt(dm, 10), durationHours: null }),
+        eventTime: new Date(endMs).toISOString(),
+        ...(durationMinutes !== undefined
+          ? { durationMinutes, durationHours: null }
+          : {}),
         remarks: evRemarks || undefined,
-        isHold: evHold,
-        createdBy: evUser
+        isHold,
+        ...(isHold && evHoldReason.trim() ? { holdReason: evHoldReason.trim() } : {}),
+        createdBy: currentUser.id
       });
     },
     onSuccess: () => {
       setEvErr(null);
       setEvRemarks("");
-      setEvDurationMinutes("");
+      setEvStartTime("");
+      setEvHoldReason("");
       setAddEventOpen(false);
       qc.invalidateQueries({ queryKey: ["lighter-sof-events", id] });
       qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
@@ -268,22 +294,15 @@ export function LighterSofDetailView({
       setEvType,
       evTime,
       setEvTime,
-      evDurationMinutes,
-      setEvDurationMinutes,
+      evStartTime,
+      setEvStartTime,
       evRemarks,
       setEvRemarks,
-      evHold,
-      setEvHold,
-      evUser,
-      setEvUser,
+      evHoldReason,
+      setEvHoldReason,
       evErr
     }),
-    [evType, evTime, evDurationMinutes, evRemarks, evHold, evUser, evErr]
-  );
-
-  const addEventUsers = useMemo(
-    () => (optionsQ.data?.users ?? []) as SofAddEventUserOption[],
-    [optionsQ.data?.users]
+    [evType, evTime, evStartTime, evRemarks, evHoldReason, evErr]
   );
 
   const laytimeSnapshot = useMemo(() => {
@@ -342,9 +361,9 @@ export function LighterSofDetailView({
     <SofAddEventSheet
       open={addEventOpen}
       onOpenChange={setAddEventOpen}
-      description="Log a new event for this lighter SOF. Choose the user recording it, then save or cancel."
+      description="Log a new event for this lighter SOF. The event is recorded under your signed-in account."
       fields={addEventFields}
-      users={addEventUsers}
+      currentUser={currentUser}
       eventTypes={eventTypesQ.data ?? []}
       typesLoading={eventTypesQ.isLoading}
       typesError={eventTypesQ.isError ? parseApiErr(eventTypesQ.error) : null}
@@ -356,8 +375,9 @@ export function LighterSofDetailView({
       isPending={addEvMut.isPending}
       saveDisabled={
         sof.status === "CLOSED" ||
-        !evUser ||
+        !currentUser?.id ||
         !evType ||
+        !evTime ||
         eventTypesQ.isLoading ||
         (eventTypesQ.data?.length ?? 0) === 0
       }
@@ -458,10 +478,7 @@ export function LighterSofDetailView({
               />
             }
             addEventDisabled={sof.status === "CLOSED"}
-            onAddEvent={() => {
-              setEvErr(null);
-              setAddEventOpen(true);
-            }}
+            onAddEvent={(prefill) => openAddEvent(prefill)}
             events={eventRows as SofEventListItem[]}
             eventTypeOptions={eventTypesQ.data ?? []}
             readOnly={sof.status === "CLOSED"}

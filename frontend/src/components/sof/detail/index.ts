@@ -1,9 +1,13 @@
 export {
   SofAddEventSheet,
-  type SofAddEventFields,
-  type SofAddEventUserOption
+  type SofAddEventCurrentUser,
+  type SofAddEventFields
 } from "./sof-add-event-sheet";
-export { SofDetailEventsTab, type SofDetailEventsTabPagination } from "./sof-detail-events-tab";
+export {
+  SofDetailEventsTab,
+  type SofDetailEventsTabPagination,
+  type SofAddEventPrefill
+} from "./sof-detail-events-tab";
 export {
   SofDetailLaytimeSheetsStrip,
   type SofDetailLaytimeSheetsStripProps

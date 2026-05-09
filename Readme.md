@@ -46,7 +46,7 @@ DATABASE_URL=postgresql://postgres:14789@localhost:5432/vms_db?schema=public
 JWT_SECRET=replace-with-long-random-secret-min-16-chars
 JWT_EXPIRES_HOURS=8
 PORT=7700
-CORS_ORIGINS=http://localhost:7701,http://127.0.0.1:7701
+CORS_ORIGINS=*
 ```
 
 Then run:
@@ -74,8 +74,9 @@ npm run build
 Create `frontend/.env`:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:7700
 PORT=7701
+HOST=0.0.0.0
+BACKEND_INTERNAL_URL=http://127.0.0.1:7700
 ```
 
 ## Run in Development Mode
@@ -148,13 +149,14 @@ Update only these values:
 PORT=7700
 CORS_ORIGINS=http://localhost:7701,http://127.0.0.1:7701
 
-# frontend/.env (or frontend/.env)
+# frontend/.env
 PORT=7701
-NEXT_PUBLIC_API_URL=http://localhost:7700
+HOST=0.0.0.0
+BACKEND_INTERNAL_URL=http://127.0.0.1:7700
 ```
 
 Rules:
 
-- If backend `PORT` changes, update frontend `NEXT_PUBLIC_API_URL`.
+- If backend `PORT` changes, update frontend `BACKEND_INTERNAL_URL`.
 - If frontend `PORT` changes, update backend `CORS_ORIGINS`.
 - Restart both servers after env changes.

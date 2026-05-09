@@ -14,11 +14,16 @@ export type SofStatus = (typeof SOF_STATUS)[number];
 export const SOF_EVENT_TYPE_SCOPES = ["MOTHER_VESSEL", "LIGHTER_VESSEL", "BOTH"] as const;
 export type SofEventTypeScopeUi = (typeof SOF_EVENT_TYPE_SCOPES)[number];
 
+/** Hold/Delay vs Normal — drives the SOF event's `isHold` automatically. */
+export const SOF_EVENT_TYPE_CATEGORIES = ["NORMAL", "HOLD_DELAY"] as const;
+export type SofEventTypeCategoryUi = (typeof SOF_EVENT_TYPE_CATEGORIES)[number];
+
 export type SofEventTypeOption = {
   id: string;
   code: string;
   name: string;
   scope: string;
+  category: SofEventTypeCategoryUi;
 };
 
 export type MasterSofEventTypeRow = {
@@ -26,6 +31,7 @@ export type MasterSofEventTypeRow = {
   code: string;
   name: string;
   scope: string;
+  category: SofEventTypeCategoryUi;
   isActive: boolean;
   deletedAt: string | null;
   createdAt: string;

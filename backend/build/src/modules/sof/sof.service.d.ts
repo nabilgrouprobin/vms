@@ -1330,6 +1330,7 @@ export declare class SofService {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;
@@ -1368,6 +1369,7 @@ export declare class SofService {
             metadata: Prisma.JsonValue | null;
         } | null;
     }>;
+    private planSofEventInsertSplit;
     updateSofEvent(eventId: string, dto: UpdateSofEventDto): Promise<{
         location: string | null;
         anchorage: {
@@ -1451,6 +1453,7 @@ export declare class SofService {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;

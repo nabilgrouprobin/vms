@@ -21,6 +21,7 @@ const rowSelect = {
     code: true,
     name: true,
     scope: true,
+    category: true,
     isActive: true,
     deletedAt: true,
     createdAt: true,
@@ -51,7 +52,7 @@ let MasterSofEventTypesService = class MasterSofEventTypesService {
             },
             orderBy: [{ name: "asc" }, { code: "asc" }],
             take: 500,
-            select: { id: true, code: true, name: true, scope: true }
+            select: { id: true, code: true, name: true, scope: true, category: true }
         });
     }
     async list(query) {
@@ -100,6 +101,7 @@ let MasterSofEventTypesService = class MasterSofEventTypesService {
                     code,
                     name: dto.name.trim(),
                     scope: dto.scope,
+                    category: (dto.category ?? "NORMAL"),
                     isActive: true
                 },
                 select: rowSelect
@@ -125,6 +127,9 @@ let MasterSofEventTypesService = class MasterSofEventTypesService {
             data.name = dto.name.trim();
         if (dto.scope !== undefined)
             data.scope = dto.scope;
+        if (dto.category !== undefined) {
+            data.category = dto.category;
+        }
         if (dto.isActive !== undefined) {
             data.isActive = dto.isActive;
             if (dto.isActive === true) {

@@ -324,6 +324,10 @@ export declare class LighterTripsService {
         flag: string | null;
     }[]>;
     private allocateTripNo;
+    private allocateAssignmentNo;
+    private makeAutoCode;
+    private ensureAutoCarrierWithLighter;
+    private ensureAutoGhat;
     create(dto: CreateLighterTripDto, assignedById: string | undefined): Promise<{
         vesselCall: {
             vessel: {

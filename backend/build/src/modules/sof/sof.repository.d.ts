@@ -1369,10 +1369,11 @@ export declare class SofRepository {
         verifiedBy: string | null;
         verifiedAt: Date | null;
     }>;
-    findActiveSofEventTypeDefinition(id: string): Prisma.Prisma__SofEventTypeDefinitionClient<{
+    findActiveSofEventTypeDefinition(id: string): Promise<{
         id: string;
-        scope: import(".prisma/client").$Enums.SofEventTypeScope;
-    } | null, null, import(".prisma/client/runtime/client").DefaultArgs, Prisma.PrismaClientOptions>;
+        scope: import("@prisma/client").SofEventTypeScope;
+        category: "NORMAL" | "HOLD_DELAY";
+    } | null>;
     listSofEvents(statementId: string, limit: number, cursor?: string): Prisma.PrismaPromise<{
         location: string | null;
         anchorage: {
@@ -1456,6 +1457,7 @@ export declare class SofRepository {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;
@@ -1583,6 +1585,7 @@ export declare class SofRepository {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;
@@ -1704,6 +1707,7 @@ export declare class SofRepository {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;
@@ -1742,6 +1746,133 @@ export declare class SofRepository {
             metadata: Prisma.JsonValue | null;
         } | null;
     }, never, import(".prisma/client/runtime/client").DefaultArgs, Prisma.PrismaClientOptions>;
+    splitInsertSofEvent(args: {
+        hostId: string;
+        hostUpdate: Prisma.SofEventUncheckedUpdateInput;
+        insert: Prisma.SofEventUncheckedCreateInput;
+        continuation: Prisma.SofEventUncheckedCreateInput | null;
+    }): Promise<{
+        location: string | null;
+        anchorage: {
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            name: string;
+            locationId: string;
+            code: string;
+        } | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        remarks: string | null;
+        laytimeImpactHours: Prisma.Decimal | null;
+        verifiedBy: string | null;
+        verifiedAt: Date | null;
+        verifiedByUser: {
+            fullName: string;
+            phone: string;
+            id: string;
+            email: string | null;
+            passwordHash: string | null;
+            isActive: boolean;
+            lastLoginAt: Date | null;
+            organizationId: string | null;
+            deletedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        } | null;
+        eventTime: Date;
+        holdReason: string | null;
+        statementId: string;
+        eventTypeId: string;
+        durationHours: Prisma.Decimal | null;
+        durationMinutes: number | null;
+        countsAsLaytime: boolean;
+        anchorageId: string | null;
+        robQuantityMt: Prisma.Decimal | null;
+        dischargeQuantityMt: Prisma.Decimal | null;
+        cumulativeDischargeMt: Prisma.Decimal | null;
+        isHold: boolean;
+        responsibleParty: string | null;
+        laytimeAccount: string | null;
+        referenceNo: string | null;
+        supportingDocuments: string[];
+        createdBy: string;
+        operationBatchId: string | null;
+        statement: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            status: import(".prisma/client").$Enums.SOFStatus;
+            remarks: string | null;
+            approvedAt: Date | null;
+            approvedBy: string | null;
+            sofNo: string;
+            scope: import(".prisma/client").$Enums.SOFScope;
+            vesselCallId: string | null;
+            lighterTripId: string | null;
+            startedAt: Date | null;
+            completedAt: Date | null;
+            laytimeAllowedHours: Prisma.Decimal | null;
+            laytimeUsedHours: Prisma.Decimal | null;
+            laytimeExcludedHours: Prisma.Decimal | null;
+            laytimeBalanceHours: Prisma.Decimal | null;
+            laytimeCommenceAt: Date | null;
+            demurrageAmount: Prisma.Decimal | null;
+            dispatchAmount: Prisma.Decimal | null;
+            netAmount: Prisma.Decimal | null;
+            verifiedBy: string | null;
+            verifiedAt: Date | null;
+        };
+        eventTypeDefinition: {
+            id: string;
+            isActive: boolean;
+            deletedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+            name: string;
+            scope: import(".prisma/client").$Enums.SofEventTypeScope;
+            code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
+        };
+        createdByUser: {
+            fullName: string;
+            phone: string;
+            id: string;
+            email: string | null;
+            passwordHash: string | null;
+            isActive: boolean;
+            lastLoginAt: Date | null;
+            organizationId: string | null;
+            deletedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        };
+        operationBatch: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            status: import(".prisma/client").$Enums.BackgroundJobStatus;
+            startedAt: Date | null;
+            completedAt: Date | null;
+            batchNo: string;
+            batchType: import(".prisma/client").$Enums.BackgroundJobType;
+            entityType: import(".prisma/client").$Enums.WorkflowEntityType | null;
+            entityId: string | null;
+            importExportJobId: string | null;
+            backgroundJobId: string | null;
+            sourceFileUrl: string | null;
+            totalRows: bigint | null;
+            processedRows: bigint | null;
+            successRows: bigint | null;
+            failedRows: bigint | null;
+            lockedBy: string | null;
+            lockedUntil: Date | null;
+            requestedById: string | null;
+            metadata: Prisma.JsonValue | null;
+        } | null;
+    }>;
     updateSofEvent(id: string, data: Prisma.SofEventUncheckedUpdateInput): Prisma.Prisma__SofEventClient<{
         location: string | null;
         anchorage: {
@@ -1825,6 +1956,7 @@ export declare class SofRepository {
             name: string;
             scope: import(".prisma/client").$Enums.SofEventTypeScope;
             code: string;
+            category: import(".prisma/client").$Enums.SofEventTypeCategory;
         };
         createdByUser: {
             fullName: string;

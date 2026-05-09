@@ -381,7 +381,11 @@ export function fetchMasterSofEventTypes(params: {
   return api<Paginated<MasterSofEventTypeRow>>(`/master-data/sof-event-types${q ? `?${q}` : ""}`);
 }
 
-export function createMasterSofEventType(body: { name: string; scope: string }) {
+export function createMasterSofEventType(body: {
+  name: string;
+  scope: string;
+  category?: "NORMAL" | "HOLD_DELAY";
+}) {
   return api<MasterSofEventTypeRow>("/master-data/sof-event-types", {
     method: "POST",
     body: JSON.stringify(body)
@@ -390,7 +394,12 @@ export function createMasterSofEventType(body: { name: string; scope: string }) 
 
 export function patchMasterSofEventType(
   id: string,
-  body: { name?: string; scope?: string; isActive?: boolean }
+  body: {
+    name?: string;
+    scope?: string;
+    category?: "NORMAL" | "HOLD_DELAY";
+    isActive?: boolean;
+  }
 ) {
   return api<MasterSofEventTypeRow>(`/master-data/sof-event-types/${encodeURIComponent(id)}`, {
     method: "PATCH",

@@ -1,4 +1,28 @@
+import type { ReadonlyURLSearchParams } from "next/navigation";
+
 import type { VesselSofWorkspaceSection } from "@/components/sof/detail/types";
+
+/**
+ * Merge updates into the current query string and return `pathname?query`.
+ * Pass `null`, `undefined`, or `""` for a key to remove it (e.g. clear `id`).
+ * Preserves unrelated params — fixes client navigations when only `id` should change.
+ */
+export function applySearchParams(
+  pathname: string,
+  current: URLSearchParams | ReadonlyURLSearchParams,
+  updates: Record<string, string | null | undefined>
+): string {
+  const sp = new URLSearchParams(current.toString());
+  for (const [key, val] of Object.entries(updates)) {
+    if (val === null || val === undefined || val === "") {
+      sp.delete(key);
+    } else {
+      sp.set(key, val);
+    }
+  }
+  const q = sp.toString();
+  return q ? `${pathname}?${q}` : pathname;
+}
 
 export function vesselSofWorkspacePath(
   section: VesselSofWorkspaceSection,

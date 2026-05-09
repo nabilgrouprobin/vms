@@ -9,5 +9,16 @@ export type SofTimelineValidationRow = {
     durationMinutes?: number | null;
 };
 export declare function sofEventDurationSpanMs(row: SofTimelineValidationRow): number | null;
-export declare function validateSofEventTimelineNoGaps(rows: SofTimelineValidationRow[]): void;
+export declare function effectiveSofPeriodBoundsMs(row: SofTimelineValidationRow, previousRowEndMs: number | null): {
+    startMs: number;
+    endMs: number;
+} | null;
+export type SofSplitHostMatch = {
+    hostId: string;
+    hostStartMs: number;
+    hostEndMs: number;
+};
+export declare function findTimelineSplitHost(timelineAsc: SofTimelineValidationRow[], newStartMs: number, newEndMs: number): SofSplitHostMatch | null;
+export declare function validateSofEventTimelineNoOverlap(rows: SofTimelineValidationRow[]): void;
+export declare const validateSofEventTimelineNoGaps: typeof validateSofEventTimelineNoOverlap;
 export declare function validateSofStatusTransition(currentStatus: SOFStatus, nextStatus: SOFStatus): void;

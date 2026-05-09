@@ -485,15 +485,26 @@ export async function exportSofEventTypesCsv(params: {
         scope: params.scope
       })
   });
-  const headers = ["id", "code", "name", "scope", "is_active"];
+  const headers = ["id", "code", "name", "scope", "category", "is_active"];
   const rows = data.map((r: MasterSofEventTypeRow) => [
     r.id,
     r.code,
     r.name,
     r.scope,
+    r.category ?? "NORMAL",
     r.isActive ? "true" : "false"
   ]);
   downloadCsvFile(`sof-event-types-${isoDateSlug()}.csv`, stringifyCsv(headers, rows));
+}
+
+const SOF_EVENT_TYPE_CATEGORY_VALUES = ["NORMAL", "HOLD_DELAY"] as const;
+type SofEventTypeCategoryCsv = (typeof SOF_EVENT_TYPE_CATEGORY_VALUES)[number];
+
+function normalizeSofEventTypeCategory(raw: string | undefined): SofEventTypeCategoryCsv | null {
+  const v = (raw ?? "").trim().toUpperCase();
+  if (v === "" || v === "NORMAL") return "NORMAL";
+  if (v === "HOLD_DELAY" || v === "HOLD/DELAY" || v === "HOLD" || v === "DELAY") return "HOLD_DELAY";
+  return null;
 }
 
 export async function importSofEventTypesCsv(csvText: string): Promise<CsvImportSummary> {
@@ -526,6 +537,12 @@ export async function importSofEventTypesCsv(csvText: string): Promise<CsvImport
       errors.push(`${rowLabel}: invalid scope "${scope}".`);
       continue;
     }
+    const category = normalizeSofEventTypeCategory(rec.category);
+    if (category === null) {
+      failed += 1;
+      errors.push(`${rowLabel}: invalid category "${rec.category}". Use NORMAL or HOLD_DELAY.`);
+      continue;
+    }
     const id = rec.id?.trim();
     const isAct = parseBool(rec.is_active);
     try {
@@ -533,11 +550,12 @@ export async function importSofEventTypesCsv(csvText: string): Promise<CsvImport
         await patchMasterSofEventType(id, {
           name,
           scope,
+          category,
           ...(isAct !== undefined ? { isActive: isAct } : {})
         });
         updated += 1;
       } else {
-        await createMasterSofEventType({ name, scope });
+        await createMasterSofEventType({ name, scope, category });
         created += 1;
       }
     } catch (e) {

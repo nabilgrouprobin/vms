@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { LighterTripStatus, Prisma } from "@prisma/client";
+import { LighterTripStatus, LocationType, Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
 import { parseLimit, parseOptionalDate } from "../sof/validators/sof.validator";
@@ -674,13 +674,186 @@ export class LighterTripsService {
     throw new BadRequestException("Could not allocate a unique trip number");
   }
 
-  async create(dto: CreateLighterTripDto, assignedById: string | undefined) {
-    const assignment = await this.prisma.lighterAssignment.findFirst({
-      where: { id: dto.lighterAssignmentId, deletedAt: null },
-      include: { trip: { select: { id: true } } }
+  private async allocateAssignmentNo(): Promise<string> {
+    for (let i = 0; i < 8; i += 1) {
+      const assignmentNo = `LA-${new Date().getFullYear()}-${randomUUID()
+        .replace(/-/g, "")
+        .slice(0, 8)
+        .toUpperCase()}`;
+      const clash = await this.prisma.lighterAssignment.findFirst({
+        where: { assignmentNo },
+        select: { id: true }
+      });
+      if (!clash) {
+        return assignmentNo;
+      }
+    }
+    throw new BadRequestException("Could not allocate a unique assignment number");
+  }
+
+  private makeAutoCode(prefix: string): string {
+    return `${prefix}-${new Date().getFullYear()}-${randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+  }
+
+  private async ensureAutoCarrierWithLighter() {
+    let carrier = await this.prisma.carrier.findFirst({
+      orderBy: [{ isActive: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true }
     });
+
+    if (!carrier) {
+      let orgType = await this.prisma.organizationTypeDefinition.findFirst({
+        where: { deletedAt: null },
+        orderBy: [{ isActive: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+        select: { id: true }
+      });
+      if (!orgType) {
+        orgType = await this.prisma.organizationTypeDefinition.create({
+          data: {
+            code: this.makeAutoCode("AUTO-ORGTYPE"),
+            name: "Auto Organization Type"
+          },
+          select: { id: true }
+        });
+      }
+
+      const org = await this.prisma.organization.create({
+        data: {
+          code: this.makeAutoCode("AUTO-ORG"),
+          name: "Auto Carrier Organization",
+          organizationTypeId: orgType.id,
+          isActive: true
+        },
+        select: { id: true }
+      });
+
+      carrier = await this.prisma.carrier.create({
+        data: {
+          code: this.makeAutoCode("AUTO-CARRIER"),
+          name: "Auto Carrier",
+          organizationId: org.id,
+          isActive: true
+        },
+        select: { id: true }
+      });
+    }
+
+    let lighter = await this.prisma.lighter.findFirst({
+      where: { carrierId: carrier.id },
+      orderBy: [{ isActive: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true }
+    });
+    if (!lighter) {
+      lighter = await this.prisma.lighter.create({
+        data: {
+          name: "Auto Lighter",
+          carrierId: carrier.id,
+          capacityMt: new Prisma.Decimal("1000"),
+          isActive: true
+        },
+        select: { id: true }
+      });
+    }
+
+    return { carrierId: carrier.id, lighterId: lighter.id };
+  }
+
+  private async ensureAutoGhat() {
+    let ghat = await this.prisma.ghat.findFirst({
+      orderBy: [{ isActive: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true }
+    });
+    if (ghat) {
+      return ghat.id;
+    }
+
+    let location = await this.prisma.location.findFirst({
+      where: { type: LocationType.GHAT, deletedAt: null },
+      orderBy: [{ isActive: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true }
+    });
+    if (!location) {
+      location = await this.prisma.location.create({
+        data: {
+          code: this.makeAutoCode("AUTO-LOC"),
+          name: "Auto Ghat Location",
+          type: LocationType.GHAT,
+          isActive: true
+        },
+        select: { id: true }
+      });
+    }
+
+    ghat = await this.prisma.ghat.create({
+      data: {
+        code: this.makeAutoCode("AUTO-GHAT"),
+        name: "Auto Ghat",
+        locationId: location.id,
+        isActive: true
+      },
+      select: { id: true }
+    });
+    return ghat.id;
+  }
+
+  async create(dto: CreateLighterTripDto, assignedById: string | undefined) {
+    const assignmentId = dto.lighterAssignmentId?.trim();
+    const vesselCallId = dto.vesselCallId?.trim();
+    if (!assignmentId && !vesselCallId) {
+      throw new BadRequestException(
+        "Provide lighterAssignmentId or vesselCallId so the system can resolve an open allocation"
+      );
+    }
+
+    let assignment = await this.prisma.lighterAssignment.findFirst({
+      where: assignmentId
+        ? { id: assignmentId, deletedAt: null }
+        : { vesselCallId, deletedAt: null, trip: null },
+      include: { trip: { select: { id: true } } },
+      orderBy: assignmentId ? undefined : [{ assignedDate: "desc" }, { id: "desc" }]
+    });
+
+    if (!assignment && !assignmentId && vesselCallId) {
+      if (!assignedById) {
+        throw new BadRequestException("Authenticated user id is required to create an allocation");
+      }
+
+      const vesselCall = await this.prisma.vesselCall.findFirst({
+          where: { id: vesselCallId },
+          select: { id: true, totalDischargeMt: true }
+      });
+
+      if (!vesselCall) {
+        throw new NotFoundException("Mother vessel call was not found");
+      }
+      const [{ carrierId, lighterId }, destinationGhatId] = await Promise.all([
+        this.ensureAutoCarrierWithLighter(),
+        this.ensureAutoGhat()
+      ]);
+
+      const assignmentNo = await this.allocateAssignmentNo();
+      const estimatedQtyMt = vesselCall.totalDischargeMt ?? new Prisma.Decimal("1000");
+
+      assignment = await this.prisma.lighterAssignment.create({
+        data: {
+          assignmentNo,
+          carrierId,
+          lighterId,
+          vesselCallId: vesselCall.id,
+          destinationGhatId,
+          estimatedQtyMt,
+          assignedBy: assignedById
+        },
+        include: { trip: { select: { id: true } } }
+      });
+    }
+
     if (!assignment) {
-      throw new NotFoundException("Lighter assignment was not found");
+      throw new NotFoundException(
+        assignmentId
+          ? "Lighter assignment was not found"
+          : "No open lighter allocation found for this mother vessel call"
+      );
     }
     if (assignment.trip) {
       throw new BadRequestException("This assignment already has a lighter trip");

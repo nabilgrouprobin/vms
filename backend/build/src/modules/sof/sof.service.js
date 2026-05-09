@@ -316,7 +316,100 @@ let SofService = class SofService {
         const eventTime = (0, sof_validator_1.parseRequiredDate)(dto.eventTime, "eventTime");
         const { outMinutes, outHours } = this.resolveSofDurationForCreate(dto);
         const timeline = await this.sofRepository.listSofEventsTimelineForValidation(statementId);
-        (0, sof_validator_1.validateSofEventTimelineNoGaps)([
+        const derivedIsHold = eventTypeDef.category === "HOLD_DELAY";
+        const baseInsert = this.removeUndefined({
+            statementId,
+            eventTypeId: dto.eventTypeId,
+            eventTime,
+            durationHours: outHours,
+            durationMinutes: outMinutes,
+            countsAsLaytime: dto.countsAsLaytime ?? true,
+            laytimeImpactHours: this.toDecimal(dto.laytimeImpactHours),
+            location: dto.location,
+            anchorageId: dto.anchorageId,
+            robQuantityMt: this.toDecimal(dto.robQuantityMt),
+            dischargeQuantityMt: this.toDecimal(dto.dischargeQuantityMt),
+            cumulativeDischargeMt: this.toDecimal(dto.cumulativeDischargeMt),
+            isHold: derivedIsHold,
+            holdReason: derivedIsHold ? dto.holdReason : null,
+            responsibleParty: dto.responsibleParty,
+            laytimeAccount: dto.laytimeAccount,
+            referenceNo: dto.referenceNo,
+            remarks: dto.remarks,
+            supportingDocuments: dto.supportingDocuments ?? [],
+            createdBy: dto.createdBy,
+            verifiedBy: dto.verifiedBy,
+            verifiedAt: (0, sof_validator_1.parseOptionalDate)(dto.verifiedAt, "verifiedAt"),
+            operationBatchId: dto.operationBatchId
+        });
+        const splitPlan = this.planSofEventInsertSplit({
+            timeline,
+            newEnd: eventTime,
+            newDurationMinutes: outMinutes ?? null,
+            newDurationHours: outHours ?? null
+        });
+        if (splitPlan) {
+            const host = await this.sofRepository.findSofEvent(splitPlan.hostId);
+            if (!host) {
+                throw new common_1.BadRequestException("Could not split the surrounding event: host event was not found. Refresh and try again.");
+            }
+            const hostStoresMinutes = host.durationMinutes !== null && host.durationMinutes !== undefined && host.durationMinutes > 0;
+            const hostStoresHoursOnly = !hostStoresMinutes &&
+                host.durationHours !== null &&
+                Number(host.durationHours) > 0;
+            const hostUpdate = {
+                eventTime: new Date(splitPlan.newStartMs),
+                ...(hostStoresMinutes
+                    ? { durationMinutes: splitPlan.hostNewDurationMinutes, durationHours: null }
+                    : hostStoresHoursOnly
+                        ? {
+                            durationHours: new client_1.Prisma.Decimal(splitPlan.hostNewDurationMinutes / 60),
+                            durationMinutes: null
+                        }
+                        : {
+                            durationMinutes: splitPlan.hostNewDurationMinutes,
+                            durationHours: null
+                        })
+            };
+            const continuationUsesMinutes = hostStoresMinutes || !hostStoresHoursOnly;
+            let continuation = null;
+            if (splitPlan.continuationDurationMinutes > 0) {
+                continuation = this.removeUndefined({
+                    statementId: host.statementId,
+                    eventTypeId: host.eventTypeId,
+                    eventTime: new Date(splitPlan.hostOriginalEndMs),
+                    ...(continuationUsesMinutes
+                        ? {
+                            durationMinutes: splitPlan.continuationDurationMinutes,
+                            durationHours: null
+                        }
+                        : {
+                            durationHours: new client_1.Prisma.Decimal(splitPlan.continuationDurationMinutes / 60),
+                            durationMinutes: null
+                        }),
+                    countsAsLaytime: host.countsAsLaytime,
+                    laytimeImpactHours: host.laytimeImpactHours,
+                    location: host.location,
+                    anchorageId: host.anchorageId,
+                    isHold: host.isHold,
+                    holdReason: host.holdReason,
+                    responsibleParty: host.responsibleParty,
+                    laytimeAccount: host.laytimeAccount,
+                    referenceNo: host.referenceNo,
+                    remarks: host.remarks,
+                    supportingDocuments: host.supportingDocuments ?? [],
+                    createdBy: dto.createdBy,
+                    operationBatchId: host.operationBatchId
+                });
+            }
+            return this.sofRepository.splitInsertSofEvent({
+                hostId: host.id,
+                hostUpdate,
+                insert: baseInsert,
+                continuation
+            });
+        }
+        (0, sof_validator_1.validateSofEventTimelineNoOverlap)([
             ...timeline.map((r) => ({
                 id: r.id,
                 eventTime: r.eventTime,
@@ -330,31 +423,32 @@ let SofService = class SofService {
                 durationMinutes: outMinutes
             }
         ]);
-        return this.sofRepository.createSofEvent(this.removeUndefined({
-            statementId,
-            eventTypeId: dto.eventTypeId,
-            eventTime,
-            durationHours: outHours,
-            durationMinutes: outMinutes,
-            countsAsLaytime: dto.countsAsLaytime ?? true,
-            laytimeImpactHours: this.toDecimal(dto.laytimeImpactHours),
-            location: dto.location,
-            anchorageId: dto.anchorageId,
-            robQuantityMt: this.toDecimal(dto.robQuantityMt),
-            dischargeQuantityMt: this.toDecimal(dto.dischargeQuantityMt),
-            cumulativeDischargeMt: this.toDecimal(dto.cumulativeDischargeMt),
-            isHold: dto.isHold ?? false,
-            holdReason: dto.holdReason,
-            responsibleParty: dto.responsibleParty,
-            laytimeAccount: dto.laytimeAccount,
-            referenceNo: dto.referenceNo,
-            remarks: dto.remarks,
-            supportingDocuments: dto.supportingDocuments ?? [],
-            createdBy: dto.createdBy,
-            verifiedBy: dto.verifiedBy,
-            verifiedAt: (0, sof_validator_1.parseOptionalDate)(dto.verifiedAt, "verifiedAt"),
-            operationBatchId: dto.operationBatchId
-        }));
+        return this.sofRepository.createSofEvent(baseInsert);
+    }
+    planSofEventInsertSplit(args) {
+        const span = (0, sof_validator_1.sofEventDurationSpanMs)({
+            id: "new",
+            eventTime: args.newEnd,
+            durationHours: args.newDurationHours ?? null,
+            durationMinutes: args.newDurationMinutes ?? null
+        });
+        if (span === null || span <= 0)
+            return null;
+        const newEndMs = args.newEnd.getTime();
+        const newStartMs = newEndMs - span;
+        const sortedTimeline = [...args.timeline].sort((a, b) => a.eventTime.getTime() - b.eventTime.getTime() || a.id.localeCompare(b.id));
+        const hostMatch = (0, sof_validator_1.findTimelineSplitHost)(sortedTimeline, newStartMs, newEndMs);
+        if (!hostMatch)
+            return null;
+        const hostNewDurationMinutes = Math.max(1, Math.round((newStartMs - hostMatch.hostStartMs) / 60_000));
+        const continuationDurationMinutes = Math.max(0, Math.round((hostMatch.hostEndMs - newEndMs) / 60_000));
+        return {
+            hostId: hostMatch.hostId,
+            newStartMs,
+            hostOriginalEndMs: hostMatch.hostEndMs,
+            hostNewDurationMinutes,
+            continuationDurationMinutes
+        };
     }
     async updateSofEvent(eventId, dto) {
         const event = await this.sofRepository.findSofEvent(eventId);
@@ -365,19 +459,23 @@ let SofService = class SofService {
         if (sof.status === client_1.SOFStatus.CLOSED) {
             throw new common_1.ConflictException("Closed SOF records cannot be edited");
         }
+        let derivedIsHold;
+        let nextEventTypeCategory;
         if (dto.eventTypeId !== undefined) {
             const eventTypeDef = await this.sofRepository.findActiveSofEventTypeDefinition(dto.eventTypeId);
             if (!eventTypeDef) {
                 throw new common_1.BadRequestException("SOF event type was not found or is inactive");
             }
             this.assertSofEventTypeMatchesScope(eventTypeDef.scope, sof.scope);
+            nextEventTypeCategory = eventTypeDef.category;
+            derivedIsHold = eventTypeDef.category === "HOLD_DELAY";
         }
         const nextEventTime = dto.eventTime
             ? (0, sof_validator_1.parseRequiredDate)(dto.eventTime, "eventTime")
             : event.eventTime;
         const { nextMinutes, nextHours } = this.resolveSofDurationForUpdate(event, dto);
         const timeline = await this.sofRepository.listSofEventsTimelineForValidation(event.statementId);
-        (0, sof_validator_1.validateSofEventTimelineNoGaps)(timeline.map((r) => r.id === eventId
+        (0, sof_validator_1.validateSofEventTimelineNoOverlap)(timeline.map((r) => r.id === eventId
             ? {
                 id: r.id,
                 eventTime: nextEventTime,
@@ -403,8 +501,12 @@ let SofService = class SofService {
             robQuantityMt: this.toNullableDecimal(dto.robQuantityMt),
             dischargeQuantityMt: this.toNullableDecimal(dto.dischargeQuantityMt),
             cumulativeDischargeMt: this.toNullableDecimal(dto.cumulativeDischargeMt),
-            isHold: dto.isHold,
-            holdReason: dto.holdReason,
+            isHold: derivedIsHold,
+            holdReason: nextEventTypeCategory === "NORMAL"
+                ? null
+                : nextEventTypeCategory === "HOLD_DELAY"
+                    ? dto.holdReason
+                    : dto.holdReason,
             responsibleParty: dto.responsibleParty,
             laytimeAccount: dto.laytimeAccount,
             referenceNo: dto.referenceNo,

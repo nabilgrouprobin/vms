@@ -7,15 +7,15 @@ import { useEffect, useId, useMemo, useState } from "react";
 
 import {
   SofAddEventSheet,
-  type SofAddEventFields,
-  type SofAddEventUserOption
+  type SofAddEventCurrentUser,
+  type SofAddEventFields
 } from "@/components/sof/detail/sof-add-event-sheet";
 import { SofDetailHeader } from "@/components/sof/detail/sof-detail-header";
 import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-tab";
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
 import { LaytimeSnapshotToolbar } from "@/components/sof/laytime-snapshot-toolbar";
-import { useSofOptionsQuery } from "@/hooks/use-sof-options";
+import { getUserProfile } from "@/lib/auth-storage";
 
 import {
   ImportContractLaytimeForm,
@@ -40,6 +40,7 @@ import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
 import {
   flatSofEventInfinitePages,
   latestSofEventMetrics,
+  toDatetimeLocalValue as toLocalDtInput,
   type SofEventInfinitePages
 } from "@/lib/sof-event-display";
 import {
@@ -113,8 +114,6 @@ export function MotherSofDetailView({
     enabled: !!id
   });
 
-  const optionsQ = useSofOptionsQuery();
-
   const eventTypesQ = useQuery({
     queryKey: ["sof-event-type-options", "MOTHER_VESSEL"],
     queryFn: () => fetchSofEventTypeOptions("MOTHER_VESSEL"),
@@ -179,12 +178,16 @@ export function MotherSofDetailView({
 
   const [evType, setEvType] = useState("");
   const [evTime, setEvTime] = useState("");
-  const [evDurationMinutes, setEvDurationMinutes] = useState("");
+  const [evStartTime, setEvStartTime] = useState("");
   const [evRemarks, setEvRemarks] = useState("");
-  const [evHold, setEvHold] = useState(false);
-  const [evUser, setEvUser] = useState("");
+  const [evHoldReason, setEvHoldReason] = useState("");
   const [evErr, setEvErr] = useState<string | null>(null);
   const [addEventOpen, setAddEventOpen] = useState(false);
+
+  const currentUser = useMemo<SofAddEventCurrentUser | null>(() => {
+    const p = getUserProfile();
+    return p ? { id: p.id, fullName: p.fullName, email: p.email } : null;
+  }, []);
 
   useEffect(() => {
     const list = eventTypesQ.data;
@@ -192,31 +195,54 @@ export function MotherSofDetailView({
     setEvType((prev) => (prev && list.some((t) => t.id === prev) ? prev : list[0].id));
   }, [eventTypesQ.data]);
 
+  const openAddEvent = (prefill?: { startIso?: string | null; endIso?: string | null }) => {
+    setEvErr(null);
+    setEvHoldReason("");
+    if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
+    if (prefill?.startIso !== undefined) {
+      setEvStartTime(prefill.startIso ? toLocalDtInput(prefill.startIso) : "");
+    } else {
+      // Default the new event's start to the most recent event's end so the user
+      // sees the natural chain point and can still adjust it before saving.
+      const lastEnd = latestEventMetrics?.eventTime ?? null;
+      setEvStartTime(lastEnd ? toLocalDtInput(lastEnd) : "");
+    }
+    setAddEventOpen(true);
+  };
+
   const addEvMut = useMutation({
     mutationFn: () => {
-      if (!evUser) throw new Error("Select a user (created by)");
+      if (!currentUser?.id) throw new Error("You must be signed in to record events");
       if (!evType) throw new Error("Select an event type");
-      const t = evTime ? new Date(evTime).toISOString() : new Date().toISOString();
-      const dm = evDurationMinutes.trim();
-      if (dm !== "") {
-        const n = parseInt(dm, 10);
-        if (!Number.isFinite(n) || n <= 0) {
-          throw new Error("Duration must be a positive whole number of minutes");
-        }
+      if (!evTime) throw new Error("Set the event end time");
+      const endMs = new Date(evTime).getTime();
+      if (!Number.isFinite(endMs)) throw new Error("Invalid end time");
+      let durationMinutes: number | undefined;
+      if (evStartTime.trim() !== "") {
+        const startMs = new Date(evStartTime).getTime();
+        if (!Number.isFinite(startMs)) throw new Error("Invalid start time");
+        if (startMs >= endMs) throw new Error("Start time must be before end time");
+        durationMinutes = Math.max(1, Math.round((endMs - startMs) / 60_000));
       }
+      const selectedType = eventTypesQ.data?.find((t) => t.id === evType) ?? null;
+      const isHold = selectedType?.category === "HOLD_DELAY";
       return createMotherSofEvent(id, {
         eventTypeId: evType,
-        eventTime: t,
-        ...(dm === "" ? {} : { durationMinutes: parseInt(dm, 10), durationHours: null }),
+        eventTime: new Date(endMs).toISOString(),
+        ...(durationMinutes !== undefined
+          ? { durationMinutes, durationHours: null }
+          : {}),
         remarks: evRemarks || undefined,
-        isHold: evHold,
-        createdBy: evUser
+        isHold,
+        ...(isHold && evHoldReason.trim() ? { holdReason: evHoldReason.trim() } : {}),
+        createdBy: currentUser.id
       });
     },
     onSuccess: () => {
       setEvErr(null);
       setEvRemarks("");
-      setEvDurationMinutes("");
+      setEvStartTime("");
+      setEvHoldReason("");
       setAddEventOpen(false);
       qc.invalidateQueries({ queryKey: ["mother-sof-events", id] });
       qc.invalidateQueries({ queryKey: ["mother-sof", id] });
@@ -230,22 +256,15 @@ export function MotherSofDetailView({
       setEvType,
       evTime,
       setEvTime,
-      evDurationMinutes,
-      setEvDurationMinutes,
+      evStartTime,
+      setEvStartTime,
       evRemarks,
       setEvRemarks,
-      evHold,
-      setEvHold,
-      evUser,
-      setEvUser,
+      evHoldReason,
+      setEvHoldReason,
       evErr
     }),
-    [evType, evTime, evDurationMinutes, evRemarks, evHold, evUser, evErr]
-  );
-
-  const addEventUsers = useMemo(
-    () => (optionsQ.data?.users ?? []) as SofAddEventUserOption[],
-    [optionsQ.data?.users]
+    [evType, evTime, evStartTime, evRemarks, evHoldReason, evErr]
   );
 
   const [layRecalc, setLayRecalc] = useState<{
@@ -337,9 +356,9 @@ export function MotherSofDetailView({
     <SofAddEventSheet
       open={addEventOpen}
       onOpenChange={setAddEventOpen}
-      description="Log a new event for this SOF. Choose the user recording it, then save or cancel."
+      description="Log a new event for this SOF. The event is recorded under your signed-in account."
       fields={addEventFields}
-      users={addEventUsers}
+      currentUser={currentUser}
       eventTypes={eventTypesQ.data ?? []}
       typesLoading={eventTypesQ.isLoading}
       typesError={eventTypesQ.isError ? parseApiErr(eventTypesQ.error) : null}
@@ -350,7 +369,11 @@ export function MotherSofDetailView({
       }}
       isPending={addEvMut.isPending}
       saveDisabled={
-        !evUser || !evType || eventTypesQ.isLoading || (eventTypesQ.data?.length ?? 0) === 0
+        !currentUser?.id ||
+        !evType ||
+        !evTime ||
+        eventTypesQ.isLoading ||
+        (eventTypesQ.data?.length ?? 0) === 0
       }
     />
   );
@@ -366,10 +389,7 @@ export function MotherSofDetailView({
         />
       }
       addEventDisabled={sof.status === "CLOSED"}
-      onAddEvent={() => {
-        setEvErr(null);
-        setAddEventOpen(true);
-      }}
+      onAddEvent={(prefill) => openAddEvent(prefill)}
       events={eventRows as SofEventListItem[]}
       eventTypeOptions={eventTypesQ.data ?? []}
       readOnly={sof.status === "CLOSED"}

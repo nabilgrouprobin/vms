@@ -15,6 +15,7 @@ const class_validator_1 = require("class-validator");
 class UpdateMasterSofEventTypeDto {
     name;
     scope;
+    category;
     isActive;
 }
 exports.UpdateMasterSofEventTypeDto = UpdateMasterSofEventTypeDto;
@@ -31,6 +32,11 @@ __decorate([
     (0, class_validator_1.IsEnum)(client_1.SofEventTypeScope),
     __metadata("design:type", String)
 ], UpdateMasterSofEventTypeDto.prototype, "scope", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsIn)(["NORMAL", "HOLD_DELAY"]),
+    __metadata("design:type", String)
+], UpdateMasterSofEventTypeDto.prototype, "category", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsBoolean)(),

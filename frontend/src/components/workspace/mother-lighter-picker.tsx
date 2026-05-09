@@ -4,6 +4,8 @@ import { Search } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -235,6 +237,48 @@ export function PickerEmptyState({ message }: { message: string }) {
 
 export function PickerErrorState({ message }: { message: string }) {
   return <p className="px-1 py-2 text-sm text-destructive">{message}</p>;
+}
+
+/** Compact row shown after an SOF is chosen (mother/lighter workspace + reports discharge). */
+export function SelectedSofChip({
+  kind,
+  title,
+  details,
+  changeLabel = "Change SOF",
+  onChange
+}: {
+  kind: "mother" | "lighter";
+  title: string;
+  details?: string;
+  changeLabel?: string;
+  onChange: () => void;
+}) {
+  return (
+    <Card className="w-full">
+      <CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <Badge variant={kind === "mother" ? "default" : "secondary"} className="shrink-0">
+            {kind === "mother" ? "Mother" : "Lighter"}
+          </Badge>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{title}</div>
+            {details ? (
+              <div className="truncate text-xs text-muted-foreground">{details}</div>
+            ) : null}
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full sm:w-auto"
+          onClick={onChange}
+        >
+          {changeLabel}
+        </Button>
+      </CardContent>
+    </Card>
+  );
 }
 
 /** Shell card wrapping toolbar + optional body + optional footer (e.g. load more). */

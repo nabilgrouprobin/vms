@@ -1,5 +1,16 @@
 import { SofEventTypeScope } from "@prisma/client";
-import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from "class-validator";
+import {
+  IsBoolean,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf
+} from "class-validator";
+
+import type { SofEventTypeCategoryDto } from "./create-master-sof-event-type.dto";
 
 export class UpdateMasterSofEventTypeDto {
   @IsOptional()
@@ -12,6 +23,10 @@ export class UpdateMasterSofEventTypeDto {
   @IsOptional()
   @IsEnum(SofEventTypeScope)
   scope?: SofEventTypeScope;
+
+  @IsOptional()
+  @IsIn(["NORMAL", "HOLD_DELAY"])
+  category?: SofEventTypeCategoryDto;
 
   @IsOptional()
   @IsBoolean()
