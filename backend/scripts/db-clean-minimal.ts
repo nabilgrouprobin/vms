@@ -98,10 +98,16 @@ async function seedMinimal(prisma: PrismaClient): Promise<void> {
       } as any
     });
 
+    /**
+     * Call/SOF numbers follow the unified format `YY-MM-DD-{hull}-{seq}`
+     * (3-digit padded). Hull `001` is the mother vessel above; this is the
+     * first call of the seed date.
+     */
+    const seedCallNo = "26-05-09-001-001";
     await tx.vesselCall.create({
       data: {
         id: "minimal_vessel_call",
-        callNo: "CALL-MIN-001",
+        callNo: seedCallNo,
         vesselId: "minimal_mother_vessel",
         arrivalLocationId: "minimal_loc",
         shippingAgentId: "minimal_org",
@@ -120,10 +126,11 @@ async function seedMinimal(prisma: PrismaClient): Promise<void> {
       }
     });
 
+    /** SOF number mirrors the parent call number (1:1 by schema). */
     await tx.statementOfFacts.create({
       data: {
         id: "minimal_sof",
-        sofNo: "SOF-MIN-001",
+        sofNo: seedCallNo,
         scope: SOFScope.MOTHER_VESSEL,
         vesselCallId: "minimal_vessel_call",
         status: SOFStatus.DRAFT

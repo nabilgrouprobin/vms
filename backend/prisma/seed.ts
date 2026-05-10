@@ -313,9 +313,11 @@ async function main() {
     });
     vesselCalls.push(vesselCall);
 
+    /** SOF number mirrors the parent call number (1:1 by schema). */
+    const motherSofNo = motherCallNo;
     const statement = await prisma.statementOfFacts.upsert({
       where: {
-        sofNo: `SOF-MV-ATLAS-2026-${serial}`
+        sofNo: motherSofNo
       },
       update: {
         vesselCallId: vesselCall.id,
@@ -324,7 +326,7 @@ async function main() {
         completedAt: index % 2 === 0 ? completedAt : null
       },
       create: {
-        sofNo: `SOF-MV-ATLAS-2026-${serial}`,
+        sofNo: motherSofNo,
         scope: SOFScope.MOTHER_VESSEL,
         vesselCallId: vesselCall.id,
         startedAt: norTenderedAt,
@@ -568,9 +570,11 @@ async function main() {
 
     /** Some trips already have a lighter SOF; others stay without (test “Create SOF”). */
     if (index % 3 === 1) {
+      /** Lighter SOF number mirrors the parent trip number (1:1 by schema). */
+      const lighterSofNo = lighterTrip.tripNo;
       const ltStatement = await prisma.statementOfFacts.upsert({
         where: {
-          sofNo: `SOF-LT-SEED-2026-${serial}`
+          sofNo: lighterSofNo
         },
         update: {
           lighterTripId: lighterTrip.id,
@@ -581,7 +585,7 @@ async function main() {
           laytimeBalanceHours: `${58 - index}.75`
         },
         create: {
-          sofNo: `SOF-LT-SEED-2026-${serial}`,
+          sofNo: lighterSofNo,
           scope: SOFScope.LIGHTER_VESSEL,
           lighterTripId: lighterTrip.id,
           startedAt: daysFromBase(index, 10, 0),

@@ -675,22 +675,21 @@ export class SofService {
     return this.sofRepository.deleteDailyDischarge(dischargeId);
   }
 
+  /**
+   * SOF identifier mirrors the parent call/trip number (1:1 by schema):
+   *   - Mother SOF  →  `vesselCall.callNo`   (e.g. `26-05-10-002-001`)
+   *   - Lighter SOF →  `lighterTrip.tripNo`  (e.g. `26-05-10-002-001-007`)
+   *
+   * Both `vesselCallId` / `lighterTripId` and `sofNo` are unique on the
+   * statements_of_fact table, so reusing the parent number stays unique
+   * without any prefix or timestamp suffix.
+   */
   private generateSofNo(callNo: string): string {
-    const suffix = new Date()
-      .toISOString()
-      .replace(/[-:.TZ]/g, "")
-      .slice(0, 14);
-
-    return `SOF-MV-${callNo}-${suffix}`;
+    return callNo;
   }
 
   private generateLighterSofNo(tripNo: string): string {
-    const suffix = new Date()
-      .toISOString()
-      .replace(/[-:.TZ]/g, "")
-      .slice(0, 14);
-
-    return `SOF-LT-${tripNo}-${suffix}`;
+    return tripNo;
   }
 
   private async requireStatementForScope(statementId: string, scope: SOFScope) {
