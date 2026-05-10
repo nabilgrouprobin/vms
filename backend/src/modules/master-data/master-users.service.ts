@@ -8,14 +8,16 @@ import { Prisma } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 
 import { PrismaService } from "../../prisma/prisma.service";
+import { parseLimit } from "../../lib/parse-limit";
 import { BatchUserRoleAssignmentsDto } from "./dto/batch-user-role-assignments.dto";
 import { CreateMasterUserDto } from "./dto/create-master-user.dto";
 import { CreateUserRoleAssignmentDto } from "./dto/create-user-role-assignment.dto";
 import { ListMasterUsersQueryDto } from "./dto/list-master-users.query.dto";
+import { rethrowPrismaDeleteError } from "./utils/rethrow-prisma-delete-error";
 import { UpdateMasterUserDto } from "./dto/update-master-user.dto";
 
-const DEFAULT_LIMIT = 24;
-const MAX_LIMIT = 100;
+const DEFAULT_LIST_LIMIT = 24;
+
 
 const userListSelect = {
   id: true,
@@ -35,16 +37,9 @@ const userListSelect = {
 export class MasterUsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
 
   async list(query: ListMasterUsersQueryDto) {
-    const limit = this.parseLimit(query.limit);
+    const limit = parseLimit(query.limit, DEFAULT_LIST_LIMIT);
     const includeInactive = query.includeInactive === "true";
     const search = query.search?.trim();
 
@@ -225,6 +220,24 @@ export class MasterUsersService {
       },
       select: userListSelect
     });
+  }
+
+  async hardDelete(id: string) {
+    const existing = await this.prisma.user.findFirst({
+      where: { id, isActive: false },
+      select: { id: true }
+    });
+    if (!existing) {
+      throw new NotFoundException(
+        "User was not found or is still active. Deactivate them before removing permanently."
+      );
+    }
+    try {
+      await this.prisma.user.delete({ where: { id } });
+    } catch (e) {
+      rethrowPrismaDeleteError(e);
+    }
+    return { ok: true as const };
   }
 
   async listRoleAssignments(userId: string) {

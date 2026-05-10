@@ -6,14 +6,17 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
+import { MAX_OPTION_LIST_ROWS } from "../../lib/limits";
 import { PrismaService } from "../../prisma/prisma.service";
+import { parseLimit } from "../../lib/parse-limit";
 import { allocateUniqueCode } from "./master-code.util";
 import { CreateMasterOrganizationDto } from "./dto/create-master-organization.dto";
 import { ListMasterReferenceQueryDto } from "./dto/list-master-reference.query.dto";
 import { UpdateMasterOrganizationDto } from "./dto/update-master-organization.dto";
+import { rethrowPrismaDeleteError } from "./utils/rethrow-prisma-delete-error";
 
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
+const DEFAULT_LIST_LIMIT = 30;
+
 
 const orgSelect = {
   id: true,
@@ -46,19 +49,12 @@ export class MasterOrganizationsService {
     return row;
   }
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
 
   async listOptions() {
     const rows = await this.prisma.organization.findMany({
       where: { deletedAt: null, isActive: true },
       orderBy: [{ name: "asc" }, { code: "asc" }],
-      take: 500,
+      take: MAX_OPTION_LIST_ROWS,
       select: {
         id: true,
         code: true,
@@ -75,7 +71,7 @@ export class MasterOrganizationsService {
   }
 
   async list(query: ListMasterReferenceQueryDto) {
-    const limit = this.parseLimit(query.limit);
+    const limit = parseLimit(query.limit, DEFAULT_LIST_LIMIT);
     const includeInactive = query.includeInactive === "true";
     const search = query.search?.trim();
 
@@ -204,5 +200,23 @@ export class MasterOrganizationsService {
       },
       select: orgSelect
     });
+  }
+
+  async hardDelete(id: string) {
+    const existing = await this.prisma.organization.findFirst({
+      where: { id, isActive: false },
+      select: { id: true }
+    });
+    if (!existing) {
+      throw new NotFoundException(
+        "Organization was not found or is still active. Deactivate it before removing permanently."
+      );
+    }
+    try {
+      await this.prisma.organization.delete({ where: { id } });
+    } catch (e) {
+      rethrowPrismaDeleteError(e);
+    }
+    return { ok: true as const };
   }
 }

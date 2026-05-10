@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,16 +9,13 @@ import {
   Patch,
   Post,
   Query,
-  Req,
-  UnauthorizedException,
   UseGuards
 } from "@nestjs/common";
-import type { Request } from "express";
 
+import { CurrentUserId } from "../../auth/decorators/current-user-id.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
-import type { AuthedRequestUser } from "../../auth/strategies/jwt.strategy";
 import { MASTER_DATA_EDITOR_ROLES, MASTER_DATA_VIEWER_ROLES } from "./constants/master-data-roles";
 import { BatchUserRoleAssignmentsDto } from "./dto/batch-user-role-assignments.dto";
 import { CreateMasterUserDto } from "./dto/create-master-user.dto";
@@ -25,8 +23,6 @@ import { CreateUserRoleAssignmentDto } from "./dto/create-user-role-assignment.d
 import { ListMasterUsersQueryDto } from "./dto/list-master-users.query.dto";
 import { UpdateMasterUserDto } from "./dto/update-master-user.dto";
 import { MasterUsersService } from "./master-users.service";
-
-type AuthedRequest = Request & { user?: AuthedRequestUser };
 
 @Controller("master-data/users")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -65,6 +61,15 @@ export class MasterUsersController {
     return this.users.update(id, dto);
   }
 
+  @Post(":id/purge")
+  @Roles(...MASTER_DATA_EDITOR_ROLES)
+  purge(@Param("id") id: string, @CurrentUserId() actorId: string) {
+    if (actorId === id) {
+      throw new BadRequestException("You cannot permanently delete your own account.");
+    }
+    return this.users.hardDelete(id);
+  }
+
   @Delete(":id")
   @Roles(...MASTER_DATA_EDITOR_ROLES)
   remove(@Param("id") id: string) {
@@ -76,12 +81,8 @@ export class MasterUsersController {
   addRolesBatch(
     @Param("id") id: string,
     @Body() dto: BatchUserRoleAssignmentsDto,
-    @Req() req: AuthedRequest
+    @CurrentUserId() grantor: string
   ) {
-    const grantor = req.user?.userId;
-    if (!grantor) {
-      throw new UnauthorizedException();
-    }
     return this.users.addRoleAssignmentsBatch(id, dto, grantor);
   }
 
@@ -90,12 +91,8 @@ export class MasterUsersController {
   addRole(
     @Param("id") id: string,
     @Body() dto: CreateUserRoleAssignmentDto,
-    @Req() req: AuthedRequest
+    @CurrentUserId() grantor: string
   ) {
-    const grantor = req.user?.userId;
-    if (!grantor) {
-      throw new UnauthorizedException();
-    }
     return this.users.addRoleAssignment(id, dto, grantor);
   }
 

@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException
-} from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
@@ -10,9 +6,13 @@ import { allocateUniqueCode } from "./master-code.util";
 import { CreateMasterProductDto } from "./dto/create-master-product.dto";
 import { ListMasterReferenceQueryDto } from "./dto/list-master-reference.query.dto";
 import { UpdateMasterProductDto } from "./dto/update-master-product.dto";
-
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
+import {
+  getMasterById,
+  hardDeleteMasterRecord,
+  listMasterPaginated,
+  softDeleteMasterRecord,
+  throwIfUniqueConflict
+} from "./utils/master-crud.helpers";
 
 const productSelect = {
   id: true,
@@ -27,49 +27,29 @@ const productSelect = {
   updatedAt: true
 } as const;
 
+type ProductRow = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
+
+const PRODUCT_LABEL = "Product";
+const PRODUCT_CONFLICT_MSG = "Another product already uses this code.";
+
 @Injectable()
 export class MasterProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
-
-  async list(query: ListMasterReferenceQueryDto) {
-    const limit = this.parseLimit(query.limit);
-    const includeInactive = query.includeInactive === "true";
-    const search = query.search?.trim();
-
-    const where: Prisma.ProductWhereInput = {
-      ...(includeInactive ? {} : { isActive: true }),
-      ...(search
-        ? {
-            OR: [
-              { code: { contains: search, mode: "insensitive" } },
-              { name: { contains: search, mode: "insensitive" } }
-            ]
-          }
-        : {})
-    };
-
-    const rows = await this.prisma.product.findMany({
-      where,
-      orderBy: [{ code: "asc" }, { id: "asc" }],
-      take: limit + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+  list(query: ListMasterReferenceQueryDto) {
+    return listMasterPaginated<ProductRow, typeof productSelect, Prisma.ProductWhereInput>({
+      delegate: this.prisma.product,
+      query,
       select: productSelect
     });
-
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
-    return { data: rows.slice(0, limit), nextCursor, limit };
   }
 
-  async getById(id: string) {
-    return this.prisma.product.findFirst({ where: { id }, select: productSelect });
+  getById(id: string) {
+    return getMasterById<ProductRow, typeof productSelect>({
+      delegate: this.prisma.product,
+      id,
+      select: productSelect
+    });
   }
 
   async create(dto: CreateMasterProductDto) {
@@ -91,10 +71,8 @@ export class MasterProductsService {
         },
         select: productSelect
       });
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException("Another product already uses this code.");
-      }
+    } catch (e) {
+      throwIfUniqueConflict(e, PRODUCT_CONFLICT_MSG);
       throw e;
     }
   }
@@ -106,58 +84,47 @@ export class MasterProductsService {
     }
 
     const data: Prisma.ProductUpdateInput = {};
-    if (dto.name !== undefined) {
-      data.name = dto.name.trim();
-    }
-    if (dto.type !== undefined) {
-      data.type = dto.type;
-    }
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.type !== undefined) data.type = dto.type;
     if (dto.specification !== undefined) {
       data.specification =
-        dto.specification === null || dto.specification === ""
-          ? null
-          : dto.specification.trim();
+        dto.specification === null || dto.specification === "" ? null : dto.specification.trim();
     }
     if (dto.hsCode !== undefined) {
       data.hsCode = dto.hsCode === null || dto.hsCode === "" ? null : dto.hsCode.trim();
     }
     if (dto.defaultUom !== undefined) {
       data.defaultUom =
-        dto.defaultUom === null || dto.defaultUom === ""
-          ? "MT"
-          : dto.defaultUom.trim();
+        dto.defaultUom === null || dto.defaultUom === "" ? "MT" : dto.defaultUom.trim();
     }
-    if (dto.isActive !== undefined) {
-      data.isActive = dto.isActive;
-    }
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
     if (Object.keys(data).length === 0) {
       return this.getById(id);
     }
 
     try {
-      return await this.prisma.product.update({
-        where: { id },
-        data,
-        select: productSelect
-      });
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException("Another product already uses this code.");
-      }
+      return await this.prisma.product.update({ where: { id }, data, select: productSelect });
+    } catch (e) {
+      throwIfUniqueConflict(e, PRODUCT_CONFLICT_MSG);
       throw e;
     }
   }
 
-  async softDelete(id: string) {
-    const existing = await this.prisma.product.findFirst({ where: { id }, select: { id: true } });
-    if (!existing) {
-      throw new NotFoundException("Product was not found");
-    }
-    return this.prisma.product.update({
-      where: { id },
-      data: { isActive: false },
-      select: { id: true, isActive: true }
+  softDelete(id: string) {
+    return softDeleteMasterRecord({
+      delegate: this.prisma.product,
+      id,
+      label: PRODUCT_LABEL
+    });
+  }
+
+  /** Permanent remove — only allowed when inactive and unused. */
+  hardDelete(id: string) {
+    return hardDeleteMasterRecord({
+      delegate: this.prisma.product,
+      id,
+      label: PRODUCT_LABEL
     });
   }
 }

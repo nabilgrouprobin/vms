@@ -32,6 +32,8 @@ const VESSEL_SOF_WORKSPACE_QUERY_KEYS = [
   "kind",
   "id",
   "vesselCallId",
+  "lighterCallId",
+  /** Legacy hull-only selection; workspace may normalize to `lighterCallId`. */
   "lighterVesselId",
   "pickSof"
 ] as const;
@@ -62,6 +64,9 @@ export function isVesselSofWorkspaceNavPath(pathname: string): boolean {
 export type VesselSofWorkspaceQuery = {
   id?: string | null;
   vesselCallId?: string | null;
+  /** Selected lighter port visit (`VesselCall` id for a lighter hull). */
+  lighterCallId?: string | null;
+  /** @deprecated Prefer `lighterCallId`. */
   lighterVesselId?: string | null;
   /** When set (e.g. after “Change SOF”), skip auto-selecting the only SOF so the user can choose another. */
   pickSof?: string | null;
@@ -77,10 +82,12 @@ export function vesselSofWorkspacePath(
   const s = selection ?? {};
   const sid = s.id?.trim();
   const vc = s.vesselCallId?.trim();
+  const lc = s.lighterCallId?.trim();
   const lv = s.lighterVesselId?.trim();
   const pick = s.pickSof?.trim();
   if (sid) sp.set("id", sid);
   if (vc) sp.set("vesselCallId", vc);
+  if (lc) sp.set("lighterCallId", lc);
   if (lv) sp.set("lighterVesselId", lv);
   if (pick) sp.set("pickSof", pick);
   return `/vessel-sof/${section}?${sp.toString()}`;
@@ -109,10 +116,12 @@ export function reportsDischargePath(
   sp.set("view", "discharge");
   const sid = params.id?.trim();
   const vc = params.vesselCallId?.trim();
+  const lc = params.lighterCallId?.trim();
   const lv = params.lighterVesselId?.trim();
   const pick = params.pickSof?.trim();
   if (sid) sp.set("id", sid);
   if (vc) sp.set("vesselCallId", vc);
+  if (lc) sp.set("lighterCallId", lc);
   if (lv) sp.set("lighterVesselId", lv);
   if (pick) sp.set("pickSof", pick);
   return `/reports?${sp.toString()}`;
@@ -120,13 +129,55 @@ export function reportsDischargePath(
 
 export function tripsWorkspacePath(
   kind: "mother" | "lighter",
-  selection?: { vesselCallId?: string | null; lighterVesselId?: string | null }
+  selection?: { vesselCallId?: string | null; lighterCallId?: string | null; lighterVesselId?: string | null }
 ) {
   const sp = new URLSearchParams();
   sp.set("kind", kind);
   const vc = selection?.vesselCallId?.trim();
+  const lc = selection?.lighterCallId?.trim();
   const lv = selection?.lighterVesselId?.trim();
   if (kind === "mother" && vc) sp.set("vesselCallId", vc);
-  if (kind === "lighter" && lv) sp.set("lighterVesselId", lv);
+  if (kind === "lighter" && lc) sp.set("lighterCallId", lc);
+  if (kind === "lighter" && !lc && lv) sp.set("lighterVesselId", lv);
   return `/trips?${sp.toString()}`;
+}
+
+/** Mother/lighter selection params shared with `/trips` (excludes SOF-only `id` / `pickSof`). */
+const TRIPS_WORKSPACE_SELECTION_KEYS = [
+  "kind",
+  "vesselCallId",
+  "lighterCallId",
+  "lighterVesselId"
+] as const;
+
+/** Build `/trips?…` carrying current mother/lighter call selection from vessel-sof, reports discharge, etc. */
+export function preserveTripsWorkspaceQuery(
+  targetPathname: string,
+  current: URLSearchParams | ReadonlyURLSearchParams
+): string {
+  const sp = new URLSearchParams();
+  for (const key of TRIPS_WORKSPACE_SELECTION_KEYS) {
+    const v = current.get(key);
+    if (v != null && v !== "") sp.set(key, v);
+  }
+  const q = sp.toString();
+  return q ? `${targetPathname}?${q}` : targetPathname;
+}
+
+export function isTripsWorkspaceNavPath(pathname: string): boolean {
+  return pathname === "/trips";
+}
+
+/** `/lighter-sof/new` with optional lighter port call or legacy hull id (echoed for Back + post-create redirect). */
+export function lighterSofNewPath(selection?: {
+  lighterCallId?: string | null;
+  lighterVesselId?: string | null;
+}) {
+  const sp = new URLSearchParams();
+  const lc = selection?.lighterCallId?.trim();
+  const lv = selection?.lighterVesselId?.trim();
+  if (lc) sp.set("lighterCallId", lc);
+  else if (lv) sp.set("lighterVesselId", lv);
+  const q = sp.toString();
+  return q ? `/lighter-sof/new?${q}` : "/lighter-sof/new";
 }

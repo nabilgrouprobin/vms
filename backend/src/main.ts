@@ -1,11 +1,22 @@
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import compression from "compression";
 
 import { AppModule } from "./app.module";
+import { PrismaClientExceptionFilter } from "./prisma/prisma-client-exception.filter";
 import { PrismaService } from "./prisma/prisma.service";
+import { securityHeaders } from "./security/security-headers.middleware";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Honour X-Forwarded-For when fronted by nginx / a load balancer so the
+  // auth rate limiter keys on the real client IP, not the proxy.
+  app.set("trust proxy", 1);
+  // Suppress the default `X-Powered-By` header at the express level too —
+  // belt-and-braces with the per-request middleware below.
+  app.disable("x-powered-by");
+  app.useGlobalFilters(new PrismaClientExceptionFilter());
+  app.use(securityHeaders);
   app.use(compression());
   const originList = process.env.CORS_ORIGINS?.split(",")
     .map((o) => o.trim())

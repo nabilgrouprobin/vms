@@ -25,32 +25,61 @@ function formatDurationFromTotalMinutes(totalMinutes: number): string {
 
 type SofEventWindowRow = Pick<SofEventListItem, "eventTime" | "durationHours" | "durationMinutes">;
 
+type ResolvedDuration =
+  | { kind: "minutes"; minutes: number }
+  | { kind: "hours"; hours: number }
+  | null;
+
+/**
+ * Pull the event's explicit duration (minutes wins over hours). Returns
+ * `null` when neither field is a positive finite number.
+ */
+function resolveDuration(row: SofEventWindowRow): ResolvedDuration {
+  if (row.durationMinutes != null && row.durationMinutes > 0) {
+    return { kind: "minutes", minutes: row.durationMinutes };
+  }
+  const durH = parseHours(row.durationHours);
+  if (durH !== null && durH > 0) {
+    return { kind: "hours", hours: durH };
+  }
+  return null;
+}
+
+function durationToWindow(
+  duration: ResolvedDuration,
+  toIso: string
+): { fromIso: string | null; toIso: string; durationLabel: string } | null {
+  if (!duration) return null;
+  const toMs = new Date(toIso).getTime();
+  if (duration.kind === "minutes") {
+    return {
+      fromIso: new Date(toMs - duration.minutes * 60_000).toISOString(),
+      toIso,
+      durationLabel: formatDurationFromTotalMinutes(duration.minutes)
+    };
+  }
+  const fromMs = toMs - duration.hours * 3_600_000;
+  const spanMins = Math.round((toMs - fromMs) / 60_000);
+  return {
+    fromIso: new Date(fromMs).toISOString(),
+    toIso,
+    durationLabel: formatDurationFromTotalMinutes(spanMins)
+  };
+}
+
 /** Resolve an event's window using ONLY its own duration (no chaining). */
 export function sofEventOwnWindow(row: SofEventWindowRow): {
   fromIso: string | null;
   toIso: string;
   durationLabel: string;
 } {
-  const toMs = new Date(row.eventTime).getTime();
-  const dm = row.durationMinutes != null && row.durationMinutes > 0 ? row.durationMinutes : null;
-  if (dm !== null) {
-    return {
-      fromIso: new Date(toMs - dm * 60_000).toISOString(),
+  return (
+    durationToWindow(resolveDuration(row), row.eventTime) ?? {
+      fromIso: null,
       toIso: row.eventTime,
-      durationLabel: formatDurationFromTotalMinutes(dm)
-    };
-  }
-  const durH = parseHours(row.durationHours);
-  if (durH !== null && durH > 0) {
-    const fromMs = toMs - durH * 3_600_000;
-    const spanMins = Math.round((toMs - fromMs) / 60_000);
-    return {
-      fromIso: new Date(fromMs).toISOString(),
-      toIso: row.eventTime,
-      durationLabel: formatDurationFromTotalMinutes(spanMins)
-    };
-  }
-  return { fromIso: null, toIso: row.eventTime, durationLabel: "—" };
+      durationLabel: "—"
+    }
+  );
 }
 
 /** Format a millisecond span as "h h m min". Exposed for gap rows. */
@@ -63,37 +92,20 @@ export function sofEventWindow(
   row: SofEventWindowRow,
   previousToIso: string | null
 ): { fromIso: string | null; toIso: string; durationLabel: string } {
-  const toMs = new Date(row.eventTime).getTime();
-  const dm = row.durationMinutes != null && row.durationMinutes > 0 ? row.durationMinutes : null;
-  if (dm !== null) {
-    const fromMs = toMs - dm * 60_000;
-    return {
-      fromIso: new Date(fromMs).toISOString(),
-      toIso: row.eventTime,
-      durationLabel: formatDurationFromTotalMinutes(dm)
-    };
-  }
-  const durH = parseHours(row.durationHours);
-  if (durH !== null && durH > 0) {
-    const fromMs = toMs - durH * 3_600_000;
-    const spanMins = Math.round((toMs - fromMs) / 60_000);
-    return {
-      fromIso: new Date(fromMs).toISOString(),
-      toIso: row.eventTime,
-      durationLabel: formatDurationFromTotalMinutes(spanMins)
-    };
-  }
-  const toIso = row.eventTime;
+  const ownWindow = durationToWindow(resolveDuration(row), row.eventTime);
+  if (ownWindow) return ownWindow;
+
   if (previousToIso) {
+    const toMs = new Date(row.eventTime).getTime();
     const fromMs = new Date(previousToIso).getTime();
     const spanMins = Math.round((toMs - fromMs) / 60_000);
     return {
       fromIso: previousToIso,
-      toIso,
+      toIso: row.eventTime,
       durationLabel: spanMins > 0 ? formatDurationFromTotalMinutes(spanMins) : "—"
     };
   }
-  return { fromIso: null, toIso, durationLabel: "—" };
+  return { fromIso: null, toIso: row.eventTime, durationLabel: "—" };
 }
 
 export function toDatetimeLocalValue(iso: string): string {

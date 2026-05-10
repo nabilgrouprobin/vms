@@ -1,20 +1,18 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma, SofEventTypeCategory, SofEventTypeScope } from "@prisma/client";
 
+import { MAX_OPTION_LIST_ROWS } from "../../lib/limits";
 import { PrismaService } from "../../prisma/prisma.service";
+import { parseLimit } from "../../lib/parse-limit";
 import { allocateUniqueCode } from "./master-code.util";
 import { CreateMasterSofEventTypeDto } from "./dto/create-master-sof-event-type.dto";
 import { ListMasterSofEventTypesMasterQueryDto } from "./dto/list-master-sof-event-types-master.query.dto";
 import { UpdateMasterSofEventTypeDto } from "./dto/update-master-sof-event-type.dto";
+import { rethrowPrismaDeleteError } from "./utils/rethrow-prisma-delete-error";
 
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
+const DEFAULT_LIST_LIMIT = 30;
 
-// `category` field added in 20260508094500_sof_event_type_category — until
-// `npx prisma generate` runs, the generated `SofEventTypeDefinitionSelect`
-// type doesn't yet know about it. We carry the literal as a `Select` cast
-// so Prisma stops typechecking the unknown field while still inferring the
-// returned row shape.
+
 const rowSelect = {
   id: true,
   code: true,
@@ -26,7 +24,7 @@ const rowSelect = {
   createdAt: true,
   updatedAt: true,
   _count: { select: { sofEvents: true } }
-} as unknown as Prisma.SofEventTypeDefinitionSelect;
+} satisfies Prisma.SofEventTypeDefinitionSelect;
 
 type MasterSofEventTypeRow = {
   id: string;
@@ -45,13 +43,6 @@ type MasterSofEventTypeRow = {
 export class MasterSofEventTypesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
 
   /** Types offered in SOF event pickers for the given operational scope. */
   async listOptions(forSofScope: "MOTHER_VESSEL" | "LIGHTER_VESSEL") {
@@ -67,13 +58,13 @@ export class MasterSofEventTypesService {
         scope: { in: scoped }
       },
       orderBy: [{ name: "asc" }, { code: "asc" }],
-      take: 500,
-      select: { id: true, code: true, name: true, scope: true, category: true } as never
+      take: MAX_OPTION_LIST_ROWS,
+      select: { id: true, code: true, name: true, scope: true, category: true }
     });
   }
 
   async list(query: ListMasterSofEventTypesMasterQueryDto) {
-    const limit = this.parseLimit(query.limit);
+    const limit = parseLimit(query.limit, DEFAULT_LIST_LIMIT);
     const includeInactive = query.includeInactive === "true";
     const search = query.search?.trim();
     const scopeFilter =
@@ -129,9 +120,9 @@ export class MasterSofEventTypesService {
           code,
           name: dto.name.trim(),
           scope: dto.scope,
-          category: (dto.category ?? "NORMAL") as SofEventTypeCategory,
+          category: dto.category ?? SofEventTypeCategory.NORMAL,
           isActive: true
-        } as never,
+        },
         select: rowSelect
       });
     } catch (e: any) {
@@ -195,5 +186,23 @@ export class MasterSofEventTypesService {
       },
       select: rowSelect
     });
+  }
+
+  async hardDelete(id: string) {
+    const existing = await this.prisma.sofEventTypeDefinition.findFirst({
+      where: { id, isActive: false },
+      select: { id: true }
+    });
+    if (!existing) {
+      throw new NotFoundException(
+        "SOF event type was not found or is still active. Deactivate it before removing permanently."
+      );
+    }
+    try {
+      await this.prisma.sofEventTypeDefinition.delete({ where: { id } });
+    } catch (e) {
+      rethrowPrismaDeleteError(e);
+    }
+    return { ok: true as const };
   }
 }

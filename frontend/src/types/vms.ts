@@ -44,6 +44,9 @@ export type LighterTripListRow = {
   tripNo: string;
   status: string;
   assignedAt: string;
+  /** Lighter-hull port visit when set (enables `lighterCallId` deep-links). */
+  lighterPortCallId?: string | null;
+  lighterPortCall?: { id: string; callNo: string; status: string } | null;
   lighterVessel: { id: string; name: string; imoNo: string | null };
   vesselCall: {
     id: string;
@@ -183,6 +186,7 @@ export type VesselCallListRow = {
     flag: string | null;
     isMotherVessel: boolean;
     isLighter: boolean;
+    hullDisplayCode?: number;
   };
   arrivalLocation: { id: string; name: string; type: string } | null;
   statementOfFacts: { id: string; sofNo: string; status: string; scope: string } | null;
@@ -195,7 +199,13 @@ export type VesselCallTripsMeta = {
   callNo: string;
   status: string;
   cargoNameSnapshot: string | null;
-  vessel: { id: string; name: string; imoNo: string | null };
+  vessel: {
+    id: string;
+    name: string;
+    imoNo: string | null;
+    isMotherVessel?: boolean;
+    isLighter?: boolean;
+  };
 };
 
 export type LighterVesselPickerRow = {
@@ -203,6 +213,8 @@ export type LighterVesselPickerRow = {
   name: string;
   imoNo: string | null;
   flag: string | null;
+  /** From master data; inactive vessels may still appear when picker requests them */
+  isActive?: boolean;
   activeTrip: {
     id: string;
     tripNo: string;
@@ -244,6 +256,8 @@ export type MasterVesselRow = {
   isActive: boolean;
   isMotherVessel: boolean;
   isLighter: boolean;
+  /** Monotonic hull id used in auto-generated call/trip numbers (present after hull_display_code migration). */
+  hullDisplayCode?: number;
   createdAt: string;
   updatedAt: string;
   _count: { motherCalls: number } | { lighterTrips: number };
@@ -484,6 +498,7 @@ export type LighterSofListRow = {
   lighterTrip: {
     id: string;
     tripNo: string;
+    lighterPortCallId?: string | null;
     lighterVessel: {
       id: string;
       name: string;
@@ -512,6 +527,7 @@ export type SofOptions = {
     tripNo: string;
     status: string;
     assignedAt: string;
+    lighterPortCallId?: string | null;
     lighterVessel: { id: string; name: string };
     vesselCall: { id: string; callNo: string; vessel: { id: string; name: string } };
     statementOfFacts: { id: string; sofNo: string; status: string } | null;

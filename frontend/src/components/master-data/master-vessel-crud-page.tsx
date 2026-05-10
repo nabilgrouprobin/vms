@@ -1,7 +1,7 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MasterDataCardHeader } from "@/components/master-data/master-data-card-header";
 import { MasterDataSearchFilters } from "@/components/master-data/master-data-search-filters";
@@ -14,19 +14,24 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Skeleton } from "@/components/ui/skeleton";
 import { MasterDataCsvToolbar } from "@/components/data-table/master-data-csv-toolbar";
 import { PaginationBar } from "@/components/data-table/pagination-bar";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
+import { invalidateMotherLighterPickerCaches } from "@/components/workspace/mother-lighter-vessel-picker-panel";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   createMasterVessel,
   fetchMasterVessels,
   patchMasterVessel,
+  purgeMasterVessel,
   softDeleteMasterVessel
 } from "@/lib/master-data-api";
 import { exportVesselsCsv, formatCsvImportSummary, importVesselsCsv } from "@/lib/master-data-csv-bridge";
+import { optNum } from "@/lib/form-numbers";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
-import type { MasterVesselKind, MasterVesselRow, Paginated } from "@/types/vms";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
+import type { MasterVesselKind, MasterVesselRow } from "@/types/vms";
 
 type Props = {
   kind: MasterVesselKind;
@@ -41,15 +46,6 @@ function usageLabel(row: MasterVesselRow): string {
   return `${row._count.lighterTrips} trip(s)`;
 }
 
-function optNum(s: string, label: string): number | null {
-  const t = s.trim();
-  if (!t) return null;
-  const n = parseFloat(t);
-  if (!Number.isFinite(n)) {
-    throw new Error(`${label} must be a valid number.`);
-  }
-  return n;
-}
 
 function optInt(s: string): number | null {
   const t = s.trim();
@@ -63,7 +59,7 @@ function optInt(s: string): number | null {
 
 export function MasterVesselCrudPage({ kind, title, description }: Props) {
   const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const fileRef = useRef<HTMLInputElement>(null);
   const [exportBusy, setExportBusy] = useState(false);
@@ -95,37 +91,35 @@ export function MasterVesselCrudPage({ kind, title, description }: Props) {
     }
   }, [sheetOpen]);
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-vessels", kind, debouncedSearch, includeInactive],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterVessels(kind, {
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive
-      }),
-    getNextPageParam: (last: Paginated<MasterVesselRow>) => last.nextCursor ?? undefined
-  });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
+  const fetchKindVessels = useCallback(
+    (params: { limit?: number; cursor?: string; search?: string; includeInactive?: boolean }) =>
+      fetchMasterVessels(kind, params),
+    [kind]
   );
 
-  const listResetKey = useMemo(
-    () => `${kind}\u0000${debouncedSearch}\u0000${includeInactive ? "1" : "0"}`,
-    [kind, debouncedSearch, includeInactive]
-  );
+  const onAfterMutation = useCallback(async () => {
+    await invalidateMotherLighterPickerCaches(qc);
+    await qc.invalidateQueries({ queryKey: ["sof-options"] });
+  }, [qc]);
 
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
+  const {
+    listQ,
+    pager,
+    deleteM,
+    restoreM,
+    purgeM,
+    invalidateList,
+    runRowAction
+  } = useMasterCrud<MasterVesselRow>({
+    queryKey: masterDataKeys.vessels(kind),
+    fetchList: fetchKindVessels,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: (id) => softDeleteMasterVessel(kind, id),
+    restore: (id) => patchMasterVessel(kind, id, { isActive: true }),
+    purge: (id) => purgeMasterVessel(kind, id)
   });
+  const rows = pager.pageItems;
 
   const openCreate = () => {
     setCreating(true);
@@ -190,7 +184,8 @@ export function MasterVesselCrudPage({ kind, title, description }: Props) {
       });
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-vessels", kind] });
+      await invalidateList();
+      await onAfterMutation();
       setSheetOpen(false);
     },
     onError: (e: unknown) => {
@@ -198,33 +193,29 @@ export function MasterVesselCrudPage({ kind, title, description }: Props) {
     }
   });
 
-  const deleteM = useMutation({
-    mutationFn: async (id: string) => softDeleteMasterVessel(kind, id),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-vessels", kind] });
+  /**
+   * Vessel mutations also bust mother/lighter picker + SOF-option caches that
+   * mirror the same hulls. The hook handles the primary list invalidation;
+   * we tack on the secondary buckets via `onAfterMutation`.
+   */
+  useEffect(() => {
+    if (deleteM.isSuccess || restoreM.isSuccess || purgeM.isSuccess) {
+      void onAfterMutation();
     }
-  });
-
-  const restoreM = useMutation({
-    mutationFn: async (id: string) => patchMasterVessel(kind, id, { isActive: true }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-vessels", kind] });
-    }
-  });
+    // No deps for `onAfterMutation` because qc identity is stable; track only
+    // the boolean success flags to fire once per success edge.
+  }, [deleteM.isSuccess, restoreM.isSuccess, purgeM.isSuccess, onAfterMutation]);
 
   const onDelete = (row: MasterVesselRow) => {
-    const msg = `Delete “${row.name}”? This deactivates the hull (hidden from pickers); existing calls and trips stay linked.`;
-    if (!window.confirm(msg)) return;
-    deleteM.mutate(row.id, {
-      onError: (e) => window.alert(parseApiErr(e))
-    });
+    runRowAction(
+      deleteM,
+      row.id,
+      `Delete “${row.name}”? This deactivates the hull (hidden from pickers); existing calls and trips stay linked.`
+    );
   };
 
   const onRestore = (row: MasterVesselRow) => {
-    if (!window.confirm(`Restore “${row.name}” as active?`)) return;
-    restoreM.mutate(row.id, {
-      onError: (e) => window.alert(parseApiErr(e))
-    });
+    runRowAction(restoreM, row.id, `Restore “${row.name}” as active?`);
   };
 
   const readOnly = !canEdit;
@@ -237,7 +228,7 @@ export function MasterVesselCrudPage({ kind, title, description }: Props) {
         includeInactive
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -251,10 +242,11 @@ export function MasterVesselCrudPage({ kind, title, description }: Props) {
     try {
       const text = await file.text();
       const summary = await importVesselsCsv(kind, text);
-      await qc.invalidateQueries({ queryKey: ["master-vessels", kind] });
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      await invalidateList();
+      await onAfterMutation();
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -351,15 +343,32 @@ export function MasterVesselCrudPage({ kind, title, description }: Props) {
                           </Button>
                         ) : null}
                         {canEdit && !row.isActive ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            disabled={restoreM.isPending}
-                            onClick={() => onRestore(row)}
-                          >
-                            Restore
-                          </Button>
+                          <>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={restoreM.isPending}
+                              onClick={() => onRestore(row)}
+                            >
+                              Restore
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              disabled={purgeM.isPending}
+                              onClick={() =>
+                                runRowAction(
+                                  purgeM,
+                                  row.id,
+                                  `Permanently delete “${row.name}”? This cannot be undone. It only works when there are no mother calls, lighter trips, or stock movements on this vessel.`
+                                )
+                              }
+                            >
+                              Delete forever
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </td>

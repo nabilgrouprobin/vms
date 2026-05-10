@@ -1,14 +1,28 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
+import { toDecimalOrNull } from "../../lib/decimal-json";
 import { PrismaService } from "../../prisma/prisma.service";
 import { UpdateImportContractDto } from "./dto/update-import-contract.dto";
 
-function toDec(v: number | null | undefined): Prisma.Decimal | null | undefined {
-  if (v === undefined) return undefined;
-  if (v === null) return null;
-  return new Prisma.Decimal(v);
-}
+// Only laytime + display columns leave the API. Commercial fields (price,
+// total qty, supplier, approvals) stay server-side; SOF viewers must not see
+// them just because they can read the contract id.
+const importContractSelect = {
+  id: true,
+  contractNo: true,
+  excludedDays: true,
+  holidaysExcluded: true,
+  excludedTimePeriod: true,
+  dischargeRateMtPerDay: true,
+  dischargeRateUnit: true,
+  laytimeDemurrageRatePerDay: true,
+  laytimeDispatchRatePerDay: true,
+  currency: true,
+  dischargePort: true,
+  lcEstablishByDate: true,
+  contractDate: true
+} as const satisfies Prisma.ImportContractSelect;
 
 @Injectable()
 export class ImportContractsService {
@@ -16,7 +30,8 @@ export class ImportContractsService {
 
   async getById(id: string) {
     const row = await this.prisma.importContract.findFirst({
-      where: { id, deletedAt: null }
+      where: { id, deletedAt: null },
+      select: importContractSelect
     });
     if (!row) {
       throw new NotFoundException("Import contract was not found");
@@ -39,16 +54,16 @@ export class ImportContractsService {
       data.excludedTimePeriod = dto.excludedTimePeriod;
     }
     if (dto.dischargeRateMtPerDay !== undefined) {
-      data.dischargeRateMtPerDay = toDec(dto.dischargeRateMtPerDay);
+      data.dischargeRateMtPerDay = toDecimalOrNull(dto.dischargeRateMtPerDay);
     }
     if (dto.dischargeRateUnit !== undefined) {
       data.dischargeRateUnit = dto.dischargeRateUnit;
     }
     if (dto.laytimeDemurrageRatePerDay !== undefined) {
-      data.laytimeDemurrageRatePerDay = toDec(dto.laytimeDemurrageRatePerDay);
+      data.laytimeDemurrageRatePerDay = toDecimalOrNull(dto.laytimeDemurrageRatePerDay);
     }
     if (dto.laytimeDispatchRatePerDay !== undefined) {
-      data.laytimeDispatchRatePerDay = toDec(dto.laytimeDispatchRatePerDay);
+      data.laytimeDispatchRatePerDay = toDecimalOrNull(dto.laytimeDispatchRatePerDay);
     }
     if (dto.currency !== undefined) {
       data.currency = dto.currency;
@@ -58,12 +73,16 @@ export class ImportContractsService {
     }
 
     if (Object.keys(data).length === 0) {
-      return this.prisma.importContract.findUniqueOrThrow({ where: { id } });
+      return this.prisma.importContract.findUniqueOrThrow({
+        where: { id },
+        select: importContractSelect
+      });
     }
 
     return this.prisma.importContract.update({
       where: { id },
-      data
+      data,
+      select: importContractSelect
     });
   }
 }

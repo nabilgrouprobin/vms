@@ -57,6 +57,12 @@ export class MasterLocationsController {
     return this.locations.update(id, dto);
   }
 
+  @Post(":id/purge")
+  @Roles(...MASTER_DATA_EDITOR_ROLES)
+  purge(@Param("id") id: string) {
+    return this.locations.hardDelete(id);
+  }
+
   @Delete(":id")
   @Roles(...MASTER_DATA_EDITOR_ROLES)
   remove(@Param("id") id: string) {

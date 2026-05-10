@@ -52,6 +52,12 @@ export class MasterProductsController {
     return this.products.update(id, dto);
   }
 
+  @Post(":id/purge")
+  @Roles(...MASTER_DATA_EDITOR_ROLES)
+  purge(@Param("id") id: string) {
+    return this.products.hardDelete(id);
+  }
+
   @Delete(":id")
   @Roles(...MASTER_DATA_EDITOR_ROLES)
   remove(@Param("id") id: string) {

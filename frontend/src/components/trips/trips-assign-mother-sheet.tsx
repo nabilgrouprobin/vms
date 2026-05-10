@@ -1,13 +1,16 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { invalidateMotherLighterPickerCaches } from "@/components/workspace/mother-lighter-vessel-picker-panel";
 import { createLighterTrip } from "@/lib/lighter-trips-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { fetchVesselCalls } from "@/lib/vessel-calls-api";
@@ -15,6 +18,8 @@ import type { Paginated, VesselCallListRow } from "@/types/vms";
 
 type Props = {
   lighterVesselId: string;
+  /** Current lighter tab port visit — stored on new trips for SOF/workspace deep-links. */
+  lighterPortCallId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   canEdit: boolean;
@@ -23,6 +28,7 @@ type Props = {
 
 export function TripsAssignMotherSheet({
   lighterVesselId,
+  lighterPortCallId,
   open,
   onOpenChange,
   canEdit,
@@ -30,20 +36,14 @@ export function TripsAssignMotherSheet({
 }: Props) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [vesselCallId, setVesselCallId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => {
     if (!open) {
       setSearch("");
-      setDebouncedSearch("");
       setVesselCallId(null);
       setRemarks("");
       setError(null);
@@ -70,12 +70,12 @@ export function TripsAssignMotherSheet({
       createLighterTrip({
         vesselCallId: vesselCallId!,
         lighterVesselId,
+        ...(lighterPortCallId?.trim() ? { lighterPortCallId: lighterPortCallId.trim() } : {}),
         remarks: remarks.trim() || null
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["trips-by-lighter-hull", lighterVesselId] });
-      await qc.invalidateQueries({ queryKey: ["ml-vessel-picker"] });
-      await qc.invalidateQueries({ queryKey: ["lighter-hulls-picker"] });
+      await invalidateMotherLighterPickerCaches(qc);
       onOpenChange(false);
     },
     onError: (e) => setError(parseApiErr(e))
@@ -109,7 +109,15 @@ export function TripsAssignMotherSheet({
               ) : callsQ.isError ? (
                 <p className="text-sm text-destructive">{parseApiErr(callsQ.error)}</p>
               ) : rows.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No mother vessel calls found.</p>
+                <div className="space-y-2 rounded-md border border-dashed border-border p-3">
+                  <p className="text-sm text-muted-foreground">No mother vessel calls match.</p>
+                  <Button type="button" variant="secondary" size="sm" asChild>
+                    <Link href="/vessel-calls">Open vessel calls</Link>
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Create or adjust port visits under Vessel calls, then return here.
+                  </p>
+                </div>
               ) : (
                 <ul className="max-h-56 space-y-2 overflow-y-auto rounded-md border border-border p-2">
                   {rows.map((r) => (

@@ -1,7 +1,7 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
 import { MasterDataCardHeader } from "@/components/master-data/master-data-card-header";
 import { MasterDataSearchFilters } from "@/components/master-data/master-data-search-filters";
@@ -14,13 +14,14 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PaginationBar } from "@/components/data-table/pagination-bar";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   createMasterOrganizationType,
   fetchMasterOrganizationTypes,
   patchMasterOrganizationType,
+  purgeMasterOrganizationType,
   softDeleteMasterOrganizationType
 } from "@/lib/master-data-api";
 import {
@@ -30,11 +31,12 @@ import {
 } from "@/lib/master-data-csv-bridge";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
-import { type MasterOrganizationTypeRow, type Paginated } from "@/types/vms";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
+import type { MasterOrganizationTypeRow } from "@/types/vms";
 
 export function MasterOrganizationTypesCrudPage() {
-  const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const readOnly = !canEdit;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -56,42 +58,23 @@ export function MasterOrganizationTypesCrudPage() {
     if (!sheetOpen) setFormError(null);
   }, [sheetOpen]);
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-organization-types", debouncedSearch, includeInactive],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterOrganizationTypes({
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive
-      }),
-    getNextPageParam: (last: Paginated<MasterOrganizationTypeRow>) => last.nextCursor ?? undefined
+  const {
+    listQ,
+    pager,
+    deleteM,
+    purgeM,
+    invalidateList: invalidateAll,
+    runRowAction
+  } = useMasterCrud<MasterOrganizationTypeRow>({
+    queryKey: masterDataKeys.organizationTypes(),
+    fetchList: fetchMasterOrganizationTypes,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: softDeleteMasterOrganizationType,
+    purge: purgeMasterOrganizationType,
+    extraInvalidateKeys: [["organization-type-options"]]
   });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
-  );
-
-  const listResetKey = useMemo(
-    () => `${debouncedSearch}\u0000${includeInactive ? "1" : "0"}`,
-    [debouncedSearch, includeInactive]
-  );
-
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
-  });
-
-  const invalidateAll = async () => {
-    await qc.invalidateQueries({ queryKey: ["master-organization-types"] });
-    await qc.invalidateQueries({ queryKey: ["organization-type-options"] });
-  };
+  const rows = pager.pageItems;
 
   const openCreate = () => {
     setCreating(true);
@@ -129,13 +112,10 @@ export function MasterOrganizationTypesCrudPage() {
     onError: (e: unknown) => setFormError(parseApiErr(e))
   });
 
-  const deleteM = useMutation({
-    mutationFn: (id: string) => softDeleteMasterOrganizationType(id),
-    onSuccess: async () => {
-      await invalidateAll();
-    }
-  });
-
+  /**
+   * Restore is a small custom flow: after success, also refresh the open
+   * sheet's `editing` row so its `isActive` toggle flips immediately.
+   */
   const restoreM = useMutation({
     mutationFn: (row: MasterOrganizationTypeRow) =>
       patchMasterOrganizationType(row.id, { isActive: true }),
@@ -153,7 +133,7 @@ export function MasterOrganizationTypesCrudPage() {
         includeInactive
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -168,9 +148,9 @@ export function MasterOrganizationTypesCrudPage() {
       const text = await file.text();
       const summary = await importOrganizationTypesCsv(text);
       await invalidateAll();
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -260,37 +240,49 @@ export function MasterOrganizationTypesCrudPage() {
                               variant="destructive"
                               size="sm"
                               disabled={deleteM.isPending}
-                              onClick={() => {
-                                if (
-                                  !window.confirm(
-                                    `Archive organization type “${row.name}”? Organizations still assigned must be moved before this succeeds.`
-                                  )
-                                ) {
-                                  return;
-                                }
-                                deleteM.mutate(row.id, {
-                                  onError: (e) => window.alert(parseApiErr(e))
-                                });
-                              }}
+                              onClick={() =>
+                                runRowAction(
+                                  deleteM,
+                                  row.id,
+                                  `Archive organization type “${row.name}”? Organizations still assigned must be moved before this succeeds.`
+                                )
+                              }
                             >
                               Delete
                             </Button>
                           ) : null}
                           {canEdit && row.deletedAt !== null ? (
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              disabled={restoreM.isPending}
-                              onClick={() => {
-                                if (!window.confirm(`Restore type “${row.name}”?`)) return;
-                                restoreM.mutate(row, {
-                                  onError: (e: unknown) => window.alert(parseApiErr(e))
-                                });
-                              }}
-                            >
-                              Restore
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={restoreM.isPending}
+                                onClick={() => {
+                                  if (!window.confirm(`Restore type “${row.name}”?`)) return;
+                                  restoreM.mutate(row, {
+                                    onError: (e: unknown) => toast.error(parseApiErr(e))
+                                  });
+                                }}
+                              >
+                                Restore
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                disabled={purgeM.isPending}
+                                onClick={() =>
+                                  runRowAction(
+                                    purgeM,
+                                    row.id,
+                                    `Permanently delete organization type “${row.name}”? This cannot be undone. Zero organizations must reference this type.`
+                                  )
+                                }
+                              >
+                                Delete forever
+                              </Button>
+                            </>
                           ) : null}
                         </div>
                       </td>
@@ -372,7 +364,7 @@ export function MasterOrganizationTypesCrudPage() {
               onClick={() => {
                 if (!editing || !window.confirm(`Restore “${editing.name}”?`)) return;
                 restoreM.mutate(editing, {
-                  onError: (e: unknown) => window.alert(parseApiErr(e))
+                  onError: (e: unknown) => toast.error(parseApiErr(e))
                 });
               }}
             >

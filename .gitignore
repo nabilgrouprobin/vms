@@ -3,15 +3,31 @@
 /backend/node_modules
 /frontend/node_modules
 
+# Build outputs
 /backend/dist
-frontend/.next
+/backend/build
+/backend/tsconfig.build.tsbuildinfo
+/frontend/.next
+/frontend/.next-old
+/frontend/.next-prod
+/frontend/tsconfig.tsbuildinfo
 
+# Env files (NEVER commit)
 /backend/.env
+/backend/.env.local
+/backend/.env.production.local
 /frontend/.env
+/frontend/.env.local
+/frontend/.env.production.local
 
-# OS/editor
+# Local TLS certs
+*.pem
+
+# OS / editor
 /.DS_Store
 Thumbs.db
+*.swp
+.idea/
 
 # Logs
 *.log
@@ -19,5 +35,3 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-
-

@@ -52,6 +52,12 @@ export class MasterGhatsController {
     return this.ghats.update(id, dto);
   }
 
+  @Post(":id/purge")
+  @Roles(...MASTER_DATA_EDITOR_ROLES)
+  purge(@Param("id") id: string) {
+    return this.ghats.hardDelete(id);
+  }
+
   @Delete(":id")
   @Roles(...MASTER_DATA_EDITOR_ROLES)
   remove(@Param("id") id: string) {

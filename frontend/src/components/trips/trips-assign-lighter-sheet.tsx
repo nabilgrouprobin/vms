@@ -1,8 +1,10 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { invalidateMotherLighterPickerCaches } from "@/components/workspace/mother-lighter-vessel-picker-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +17,7 @@ import {
 } from "@/lib/lighter-trips-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { cn } from "@/lib/utils";
-import type { OpenLighterAssignmentRow } from "@/types/vms";
+import type { LighterVesselPickerRow, OpenLighterAssignmentRow, Paginated } from "@/types/vms";
 
 type Props = {
   vesselCallId: string;
@@ -34,23 +36,17 @@ export function TripsAssignLighterSheet({
 }: Props) {
   const qc = useQueryClient();
   const [assignmentId, setAssignmentId] = useState<string | null>(null);
-  const [hullId, setHullId] = useState<string | null>(null);
-  const [hullSearch, setHullSearch] = useState("");
-  const [debouncedHullSearch, setDebouncedHullSearch] = useState("");
+  const [lighterVesselIdPick, setLighterVesselIdPick] = useState<string | null>(null);
+  const [lighterSearch, setLighterSearch] = useState("");
+  const debouncedLighterSearch = useDebouncedValue(lighterSearch, 300);
   const [remarks, setRemarks] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedHullSearch(hullSearch), 300);
-    return () => clearTimeout(t);
-  }, [hullSearch]);
-
-  useEffect(() => {
     if (!open) {
       setAssignmentId(null);
-      setHullId(null);
-      setHullSearch("");
-      setDebouncedHullSearch("");
+      setLighterVesselIdPick(null);
+      setLighterSearch("");
       setRemarks("");
       setError(null);
     }
@@ -62,24 +58,32 @@ export function TripsAssignLighterSheet({
     enabled: open && !!vesselCallId && canEdit
   });
 
-  const hullsQ = useQuery({
-    queryKey: ["lighter-hulls-picker", debouncedHullSearch],
-    queryFn: () => fetchLighterVesselsForPicker(debouncedHullSearch || undefined, 100),
+  const lighterPickQ = useInfiniteQuery({
+    queryKey: ["lighter-hulls-picker", debouncedLighterSearch],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      fetchLighterVesselsForPicker({
+        search: debouncedLighterSearch || undefined,
+        cursor: pageParam,
+        limit: 40,
+        includeInactive: false
+      }),
+    getNextPageParam: (last: Paginated<LighterVesselPickerRow>) => last.nextCursor ?? undefined,
     enabled: open && canEdit
   });
 
-  const hullRows = useMemo(() => {
-    const rows = [...(hullsQ.data ?? [])];
+  const lighterPickRows = useMemo(() => {
+    const rows = [...(lighterPickQ.data?.pages.flatMap((p) => p.data) ?? [])];
     rows.sort((a, b) => Number(!!a.activeTrip) - Number(!!b.activeTrip));
     return rows;
-  }, [hullsQ.data]);
+  }, [lighterPickQ.data]);
 
   useEffect(() => {
-    if (!hullId || !hullsQ.data) return;
-    if (!hullsQ.data.some((r) => r.id === hullId)) {
-      setHullId(null);
+    if (!lighterVesselIdPick || !lighterPickRows.length) return;
+    if (!lighterPickRows.some((r) => r.id === lighterVesselIdPick)) {
+      setLighterVesselIdPick(null);
     }
-  }, [hullsQ.data, hullId]);
+  }, [lighterPickRows, lighterVesselIdPick]);
 
   const createM = useMutation({
     mutationFn: (payload: {
@@ -90,8 +94,7 @@ export function TripsAssignLighterSheet({
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["trips-by-vessel-call", vesselCallId] });
       await qc.invalidateQueries({ queryKey: ["open-lighter-assignments", vesselCallId] });
-      await qc.invalidateQueries({ queryKey: ["ml-vessel-picker"] });
-      await qc.invalidateQueries({ queryKey: ["lighter-hulls-picker"] });
+      await invalidateMotherLighterPickerCaches(qc);
       onOpenChange(false);
     },
     onError: (e) => setError(parseApiErr(e))
@@ -117,7 +120,7 @@ export function TripsAssignLighterSheet({
         <SheetTitle>Assign lighter</SheetTitle>
         <SheetDescription>
           Start a trip on an open carrier allocation for {motherTitle}. Each allocation can have one
-          trip; the physical lighter hull must not already have an unfinished trip.
+          trip; the lighter vessel must not already have an unfinished trip.
         </SheetDescription>
 
         {!canEdit ? (
@@ -155,7 +158,7 @@ export function TripsAssignLighterSheet({
                       >
                         <div className="font-medium">{a.assignmentNo}</div>
                         <div className="text-xs text-muted-foreground">
-                          Registry lighter: {a.lighter.name} · Carrier:{" "}
+                          Lighter: {a.lighter.name} · Carrier:{" "}
                           {a.carrier.organization.name} · {a.estimatedQtyMt} MT est. · Ghat:{" "}
                           {a.destinationGhat.name}
                         </div>
@@ -167,57 +170,75 @@ export function TripsAssignLighterSheet({
             </section>
 
             <section className="space-y-2">
-              <Label htmlFor="hull-search">Physical lighter hull</Label>
+              <Label htmlFor="lighter-search">Lighter vessel</Label>
               <Input
-                id="hull-search"
-                placeholder="Search by hull name or IMO…"
-                value={hullSearch}
-                onChange={(e) => setHullSearch(e.target.value)}
+                id="lighter-search"
+                placeholder="Search by name or IMO…"
+                value={lighterSearch}
+                onChange={(e) => setLighterSearch(e.target.value)}
               />
-              {hullsQ.isLoading ? (
+              {lighterPickQ.isLoading ? (
                 <Skeleton className="h-32 w-full" />
-              ) : hullsQ.isError ? (
-                <p className="text-sm text-destructive">{parseApiErr(hullsQ.error)}</p>
-              ) : hullRows.length === 0 ? (
+              ) : lighterPickQ.isError ? (
+                <p className="text-sm text-destructive">{parseApiErr(lighterPickQ.error)}</p>
+              ) : lighterPickRows.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No lighter hulls match this search. Try another name or IMO, or check that the
-                  registry has active lighter vessels.
+                  No active lighter vessels match this search. Try another name or IMO, or add
+                  lighters under Master data.
                 </p>
-              ) : hullRows.every((v) => v.activeTrip != null) ? (
+              ) : lighterPickRows.every((v) => v.activeTrip != null || v.isActive === false) ? (
                 <p className="text-sm text-amber-800 dark:text-amber-200">
-                  Every hull in this list already has an unfinished trip — you cannot pick them
-                  here. Search for another hull, or finish or close the existing trip first.
+                  Every vessel in this list is busy or inactive — pick another or restore an active
+                  lighter in Master data.
                 </p>
               ) : (
-                <ul className="max-h-52 space-y-2 overflow-y-auto rounded-md border border-border p-2">
-                  {hullRows.map((v) => {
-                    const busy = v.activeTrip != null;
-                    return (
-                      <li key={v.id}>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => !busy && setHullId(v.id)}
-                          className={cn(
-                            "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
-                            hullId === v.id && !busy
-                              ? "border-primary bg-primary/5"
-                              : "border-transparent hover:bg-muted/60",
-                            busy && "cursor-not-allowed opacity-50"
-                          )}
-                        >
-                          <div className="font-medium">{v.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {v.imoNo ? `IMO ${v.imoNo}` : "No IMO"}
-                            {busy
-                              ? ` · Busy on ${v.activeTrip!.tripNo} (${v.activeTrip!.status}) @ ${v.activeTrip!.vesselCall.vessel.name}`
-                              : " · Available"}
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  <ul className="max-h-52 space-y-2 overflow-y-auto rounded-md border border-border p-2">
+                    {lighterPickRows.map((v) => {
+                      const busy = v.activeTrip != null;
+                      const inactive = v.isActive === false;
+                      const blocked = busy || inactive;
+                      return (
+                        <li key={v.id}>
+                          <button
+                            type="button"
+                            disabled={blocked}
+                            onClick={() => !blocked && setLighterVesselIdPick(v.id)}
+                            className={cn(
+                              "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                              lighterVesselIdPick === v.id && !blocked
+                                ? "border-primary bg-primary/5"
+                                : "border-transparent hover:bg-muted/60",
+                              blocked && "cursor-not-allowed opacity-50"
+                            )}
+                          >
+                            <div className="font-medium">{v.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {v.imoNo ? `IMO ${v.imoNo}` : "No IMO"}
+                              {inactive
+                                ? " · Inactive"
+                                : busy
+                                  ? ` · Busy on ${v.activeTrip!.tripNo} (${v.activeTrip!.status}) @ ${v.activeTrip!.vesselCall.vessel.name}`
+                                  : " · Available"}
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {lighterPickQ.hasNextPage ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full"
+                      disabled={lighterPickQ.isFetchingNextPage}
+                      onClick={() => void lighterPickQ.fetchNextPage()}
+                    >
+                      {lighterPickQ.isFetchingNextPage ? "Loading…" : "Load more lighters"}
+                    </Button>
+                  ) : null}
+                </>
               )}
             </section>
 
@@ -234,26 +255,27 @@ export function TripsAssignLighterSheet({
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
             <p className="text-xs text-muted-foreground">
-              {!hullId
-                ? hullRows.length > 0 && hullRows.every((v) => v.activeTrip != null)
-                  ? "All hulls above are busy — search for another hull or free one by closing its trip."
-                  : "Select an available lighter hull above (rows marked Busy cannot be used)."
+              {!lighterVesselIdPick
+                ? lighterPickRows.length > 0 &&
+                    lighterPickRows.every((v) => v.activeTrip != null || v.isActive === false)
+                  ? "All rows above are busy or inactive — search or load more, or fix Master data."
+                  : "Select an available lighter vessel above."
                 : "Ready to create this trip."}
             </p>
 
             <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-4">
               <Button
                 type="button"
-                disabled={!hullId || createM.isPending}
+                disabled={!lighterVesselIdPick || createM.isPending}
                 onClick={() => {
                   setError(null);
-                  if (!hullId) {
-                    setError("Choose a lighter hull.");
+                  if (!lighterVesselIdPick) {
+                    setError("Choose a lighter vessel.");
                     return;
                   }
                   void createM.mutate({
                     vesselCallId,
-                    lighterVesselId: hullId,
+                    lighterVesselId: lighterVesselIdPick,
                     remarks: remarks.trim() || null
                   });
                 }}

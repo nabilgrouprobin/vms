@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["file:///var/www/vms/frontend/src/app/favicon.ico.mjs%20%28structured%20image%20object%29"],"sourcesContent":["import src from \"IMAGE\";\nexport default { src, width: 256, height: 256 }\n"],"names":["src","width","height"],"mappings":";;;;AAAA;;uCACe;IAAEA,KAAAA,sJAAG;IAAEC,OAAO;IAAKC,QAAQ;AAAI"}},
-    {"offset": {"line": 28, "column": 0}, "map": {"version":3,"sources":["file:///var/www/vms/frontend/src/app/page.tsx"],"sourcesContent":["export default function HomePage() {\n  return (\n    <div className=\"space-y-6\">\n      <div>\n        <h1 className=\"text-2xl font-bold tracking-tight md:text-3xl\">Statement of Facts</h1>\n        <p className=\"mt-2 max-w-2xl text-muted-foreground\">\n          Sign in with a backend user that has VMS roles. Point this app at your API via{\" \"}\n          <code className=\"rounded bg-muted px-1.5 py-0.5 text-sm\">NEXT_PUBLIC_API_URL</code>.\n        </p>\n      </div>\n    </div>\n  );\n}\n"],"names":["HomePage","className"],"mappings":";;;;;;AAAe,SAASA;IACtB,qBACE,0PAAC;QAAIC,WAAU;kBACb,cAAA,0PAAC;;8BACC,0PAAC;oBAAGA,WAAU;8BAAgD;;;;;;8BAC9D,0PAAC;oBAAEA,WAAU;;wBAAuC;wBAC6B;sCAC/E,0PAAC;4BAAKA,WAAU;sCAAyC;;;;;;wBAA0B;;;;;;;;;;;;;;;;;;AAK7F"}}]
-}

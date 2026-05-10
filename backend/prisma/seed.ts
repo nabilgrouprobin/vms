@@ -32,9 +32,7 @@ const MOTHER_SEED_EVENT_TYPE_IDS = [
   'sofetype_legacy_hold',
   'sofetype_legacy_discharge_stopped',
   'sofetype_legacy_shifting',
-  'sofetype_legacy_discharge_started',
   'sofetype_legacy_breakdown',
-  'sofetype_legacy_discharge_started',
   'sofetype_legacy_completed',
   'sofetype_legacy_anchor_up'
 ] as const;
@@ -88,6 +86,13 @@ const responsibleParties = [
 
 function daysFromBase(days: number, hours = 0, minutes = 0) {
   return new Date(Date.UTC(2026, 4, 1 + days, hours, minutes, 0));
+}
+
+/** Dhaka-style date segment for seeded call/trip numbers (matches seed timeline anchor). */
+const SEED_OPS_DATE_SEG = '26-05-01';
+
+function padHull(n: number) {
+  return String(n).padStart(3, '0');
 }
 
 async function main() {
@@ -226,6 +231,7 @@ async function main() {
     });
     products.push(product);
 
+    const motherHullCode = index + 1;
     const vessel = await prisma.vessel.upsert({
       where: {
         name: `MV Atlas ${serial}`
@@ -233,7 +239,8 @@ async function main() {
       update: {
         isMotherVessel: true,
         isLighter: false,
-        isActive: true
+        isActive: true,
+        hullDisplayCode: motherHullCode
       },
       create: {
         name: `MV Atlas ${serial}`,
@@ -247,7 +254,8 @@ async function main() {
         yearBuilt: 2012 + index,
         isMotherVessel: true,
         isLighter: false,
-        isActive: true
+        isActive: true,
+        hullDisplayCode: motherHullCode
       }
     });
     vessels.push(vessel);
@@ -256,11 +264,14 @@ async function main() {
     const dischargeStartedAt = daysFromBase(index, 12, 30);
     const completedAt = daysFromBase(index, 23, 45);
 
+    const motherCallId = `seed-vcall-mv-${serial}`;
+    const motherCallNo = `${SEED_OPS_DATE_SEG}-${padHull(motherHullCode)}-001`;
     const vesselCall = await prisma.vesselCall.upsert({
       where: {
-        callNo: `MV-ATLAS-2026-${serial}`
+        id: motherCallId
       },
       update: {
+        callNo: motherCallNo,
         vesselId: vessel.id,
         arrivalLocationId: location.id,
         shippingAgentId: organizations[(index + 1) % organizations.length].id,
@@ -270,7 +281,8 @@ async function main() {
         updatedById: user.id
       },
       create: {
-        callNo: `MV-ATLAS-2026-${serial}`,
+        id: motherCallId,
+        callNo: motherCallNo,
         vesselId: vessel.id,
         arrivalLocationId: location.id,
         shippingAgentId: organizations[(index + 1) % organizations.length].id,
@@ -404,6 +416,7 @@ async function main() {
       });
     }
 
+    const lighterHullCode = 12 + index + 1;
     const lighterVessel = await prisma.vessel.upsert({
       where: {
         name: `SOF-Lighter-${serial}`
@@ -411,7 +424,8 @@ async function main() {
       update: {
         isMotherVessel: false,
         isLighter: true,
-        isActive: true
+        isActive: true,
+        hullDisplayCode: lighterHullCode
       },
       create: {
         name: `SOF-Lighter-${serial}`,
@@ -425,7 +439,8 @@ async function main() {
         yearBuilt: 2018 + (index % 5),
         isMotherVessel: false,
         isLighter: true,
-        isActive: true
+        isActive: true,
+        hullDisplayCode: lighterHullCode
       }
     });
 
@@ -439,24 +454,55 @@ async function main() {
     ];
     const tripStatus = tripStatusCycle[index % tripStatusCycle.length];
 
-    const lighterTrip = await prisma.lighterTrip.upsert({
+    const lighterPortCallId = `seed-vcall-lv-${serial}`;
+    const lighterPortCallNo = `${SEED_OPS_DATE_SEG}-${padHull(lighterHullCode)}-001`;
+    const lighterPortCall = await prisma.vesselCall.upsert({
       where: {
-        tripNo: `LT-SEED-2026-${serial}`
+        id: lighterPortCallId
       },
       update: {
+        callNo: lighterPortCallNo,
+        vesselId: lighterVessel.id,
+        arrivalLocationId: location.id,
+        status: MotherVesselStatus.EXPECTED,
+        updatedById: user.id
+      },
+      create: {
+        id: lighterPortCallId,
+        callNo: lighterPortCallNo,
+        vesselId: lighterVessel.id,
+        arrivalLocationId: location.id,
+        eta: daysFromBase(index, 8, 0),
+        status: MotherVesselStatus.EXPECTED,
+        addedById: user.id,
+        updatedById: user.id
+      }
+    });
+
+    const lighterTripId = `seed-ltrip-${serial}`;
+    const lighterTripNo = `${SEED_OPS_DATE_SEG}-${padHull(motherHullCode)}-${padHull(lighterHullCode)}-001`;
+    const lighterTrip = await prisma.lighterTrip.upsert({
+      where: {
+        id: lighterTripId
+      },
+      update: {
+        tripNo: lighterTripNo,
         vesselCallId: vesselCall.id,
         lighterVesselId: lighterVessel.id,
+        lighterPortCallId: lighterPortCall.id,
         assignedById: user.id,
         status: tripStatus,
         alongsideDate: daysFromBase(index, 13, 0),
         loadingStartedAt: daysFromBase(index, 14, 30),
         laytimeCommenceAt: daysFromBase(index, 11, 0),
         remarks: `Seed lighter trip for call ${vesselCall.callNo} · lighter ${lighterVessel.name}.`
-      },
+      } as any,
       create: {
-        tripNo: `LT-SEED-2026-${serial}`,
+        id: lighterTripId,
+        tripNo: lighterTripNo,
         vesselCallId: vesselCall.id,
         lighterVesselId: lighterVessel.id,
+        lighterPortCallId: lighterPortCall.id,
         assignedById: user.id,
         assignedAt: daysFromBase(index, 10, 0),
         status: tripStatus,
@@ -469,7 +515,7 @@ async function main() {
         arrivedGhatDate:
           index % 5 === 0 ? daysFromBase(index, 22, 0) : undefined,
         remarks: `Seed lighter trip for call ${vesselCall.callNo} · lighter ${lighterVessel.name}.`
-      }
+      } as any
     });
     lighterTrips.push(lighterTrip);
 

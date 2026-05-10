@@ -16,7 +16,11 @@ export class AppController {
     };
   }
 
-  @Public()
+  /**
+   * `/db/health` requires a valid JWT (any role). The unauthenticated `/`
+   * route above is enough for liveness probes; this one verifies DB
+   * reachability and is reserved for signed-in operators.
+   */
   @Get("db/health")
   async getDatabaseHealth() {
     await this.prisma.$queryRaw`SELECT 1`;

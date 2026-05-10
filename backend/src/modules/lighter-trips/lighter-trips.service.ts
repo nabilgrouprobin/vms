@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { LighterTripStatus, LocationType, Prisma } from "@prisma/client";
+import { DateTime } from "luxon";
 
+import {
+  MAX_DISCHARGE_METRICS_VESSEL_CALL_IDS,
+  MAX_GHAT_AGING_LIMIT
+} from "../../lib/limits";
 import { PrismaService } from "../../prisma/prisma.service";
 import { parseLimit, parseOptionalDate } from "../sof/validators/sof.validator";
 import { DEFAULT_SOF_PAGE_SIZE, MAX_SOF_PAGE_SIZE } from "../sof/constants/sof.constants";
@@ -11,8 +16,14 @@ import { ListLighterTripsQueryDto } from "./dto/list-lighter-trips.query.dto";
 import { UpdateLighterTripDto } from "./dto/update-lighter-trip.dto";
 import { aggregateBoardMetrics, type TripBoardSelect } from "./lighter-trip-board-metrics";
 import { buildLighterAssignmentSyncData } from "./lighter-trip-assignment-sync";
+import {
+  OPS_TIME_ZONE,
+  buildLighterTripNo,
+  dhakaDayBounds,
+  formatOpsDateSegment
+} from "../vessel-calls/call-numbering.util";
 
-const LIGHTER_TRIP_DETAIL_INCLUDE = Prisma.validator<Prisma.LighterTripInclude>()({
+const LIGHTER_TRIP_DETAIL_INCLUDE = {
   lighterVessel: {
     select: {
       id: true,
@@ -29,7 +40,14 @@ const LIGHTER_TRIP_DETAIL_INCLUDE = Prisma.validator<Prisma.LighterTripInclude>(
       status: true,
       totalDischargeMt: true,
       cargoNameSnapshot: true,
-      vessel: { select: { id: true, name: true, imoNo: true } }
+      vessel: { select: { id: true, name: true, imoNo: true, hullDisplayCode: true } }
+    }
+  },
+  lighterPortCall: {
+    select: {
+      id: true,
+      callNo: true,
+      status: true
     }
   },
   statementOfFacts: {
@@ -88,7 +106,7 @@ const LIGHTER_TRIP_DETAIL_INCLUDE = Prisma.validator<Prisma.LighterTripInclude>(
   _count: {
     select: { events: true, cargoes: true }
   }
-});
+} satisfies Prisma.LighterTripSelect;
 
 const TRIP_ASSIGNMENT_SYNC_SELECT = Prisma.validator<Prisma.LighterTripSelect>()({
   status: true,
@@ -172,10 +190,14 @@ export class LighterTripsService {
             vessel: { select: { id: true, name: true } }
           }
         },
+        lighterPortCallId: true,
+        lighterPortCall: {
+          select: { id: true, callNo: true, status: true }
+        },
         statementOfFacts: {
           select: { id: true, sofNo: true, status: true }
         }
-      }
+      } as unknown as Prisma.LighterTripSelect
     });
 
     const nextCursor = rows.length > limit ? rows[limit].id : null;
@@ -195,7 +217,7 @@ export class LighterTripsService {
     if (!Number.isInteger(n) || n < 1) {
       throw new BadRequestException("limit must be a positive integer");
     }
-    return Math.min(n, 500);
+    return Math.min(n, MAX_GHAT_AGING_LIMIT);
   }
 
   private async listGhatAgingReport(query: ListLighterTripsQueryDto) {
@@ -325,6 +347,9 @@ export class LighterTripsService {
       throw new BadRequestException("Cannot update a closed lighter trip");
     }
 
+    const nextLighterHullId =
+      dto.lighterVesselId !== undefined ? dto.lighterVesselId.trim() : existing.lighterVesselId;
+
     const data: Prisma.LighterTripUpdateInput = {};
 
     if (dto.remarks !== undefined) {
@@ -394,6 +419,24 @@ export class LighterTripsService {
       data.lighterVessel = { connect: { id: dto.lighterVesselId } };
     }
 
+    const dataExt = data as Prisma.LighterTripUpdateInput & {
+      lighterPortCall?: { connect: { id: string } } | { disconnect: true };
+    };
+    if (dto.lighterPortCallId !== undefined) {
+      if (dto.lighterPortCallId === null || dto.lighterPortCallId === "") {
+        dataExt.lighterPortCall = { disconnect: true };
+      } else {
+        const lp = dto.lighterPortCallId.trim();
+        await this.assertLighterPortCallMatchesHull(lp, nextLighterHullId);
+        dataExt.lighterPortCall = { connect: { id: lp } };
+      }
+    } else if (
+      dto.lighterVesselId !== undefined &&
+      dto.lighterVesselId.trim() !== existing.lighterVesselId
+    ) {
+      dataExt.lighterPortCall = { disconnect: true };
+    }
+
     const dateFields = [
       ["laytimeCommenceAt", dto.laytimeCommenceAt],
       ["wayToMVReadyAt", dto.wayToMVReadyAt],
@@ -444,7 +487,7 @@ export class LighterTripsService {
       if (hasTripScalarUpdates) {
         await tx.lighterTrip.update({
           where: { id },
-          data
+          data: dataExt
         });
       }
 
@@ -582,16 +625,116 @@ export class LighterTripsService {
     return rows;
   }
 
-  async listLighterVesselsForPicker(search?: string, limitRaw?: string, idRaw?: string) {
-    const limit = Math.min(Math.max(parseInt(limitRaw ?? "40", 10) || 40, 1), 100);
+  async listLighterVesselsForPicker(
+    search?: string,
+    limitRaw?: string,
+    idRaw?: string,
+    cursorRaw?: string,
+    includeInactiveRaw?: string
+  ): Promise<{
+    data: Array<{
+      id: string;
+      name: string;
+      imoNo: string | null;
+      flag: string | null;
+      isActive: boolean;
+      activeTrip: {
+        id: string;
+        tripNo: string;
+        status: string;
+        vesselCall: { id: string; callNo: string; vessel: { name: string } };
+      } | null;
+    }>;
+    nextCursor: string | null;
+    limit: number;
+  }> {
+    const limit = Math.min(Math.max(parseInt(limitRaw ?? "24", 10) || 24, 1), 100);
     const id = idRaw?.trim();
+    const cursor = cursorRaw?.trim();
+    const includeInactive = includeInactiveRaw === "true";
     const q = search?.trim();
+
+    const releasedForReuse: LighterTripStatus[] = [
+      LighterTripStatus.UNLOADED,
+      LighterTripStatus.CLOSED,
+      LighterTripStatus.CANCELLED
+    ];
+
+    const enrichWithActiveTrips = async (
+      vessels: Array<{
+        id: string;
+        name: string;
+        imoNo: string | null;
+        flag: string | null;
+        isActive: boolean;
+      }>
+    ) => {
+      if (!vessels.length) {
+        return [];
+      }
+      const vesselIds = vessels.map((v) => v.id);
+      const activeTrips = await this.prisma.lighterTrip.findMany({
+        where: {
+          lighterVesselId: { in: vesselIds },
+          deletedAt: null,
+          status: { notIn: releasedForReuse }
+        },
+        orderBy: [{ assignedAt: "desc" }, { id: "desc" }],
+        select: {
+          id: true,
+          tripNo: true,
+          status: true,
+          lighterVesselId: true,
+          vesselCall: {
+            select: {
+              id: true,
+              callNo: true,
+              vessel: { select: { name: true } }
+            }
+          }
+        }
+      });
+
+      const activeByVessel = new Map<string, (typeof activeTrips)[0]>();
+      for (const t of activeTrips) {
+        if (!activeByVessel.has(t.lighterVesselId)) {
+          activeByVessel.set(t.lighterVesselId, t);
+        }
+      }
+
+      return vessels.map((v) => {
+        const t = activeByVessel.get(v.id);
+        return {
+          ...v,
+          activeTrip: t
+            ? {
+                id: t.id,
+                tripNo: t.tripNo,
+                status: t.status,
+                vesselCall: t.vesselCall
+              }
+            : null
+        };
+      });
+    };
+
+    if (id) {
+      const vessel = await this.prisma.vessel.findFirst({
+        where: { id, isLighter: true },
+        select: { id: true, name: true, imoNo: true, flag: true, isActive: true }
+      });
+      if (!vessel) {
+        return { data: [], nextCursor: null, limit };
+      }
+      const data = await enrichWithActiveTrips([vessel]);
+      return { data, nextCursor: null, limit };
+    }
+
     const vessels = await this.prisma.vessel.findMany({
       where: {
         isLighter: true,
-        isActive: true,
-        ...(id ? { id } : {}),
-        ...(!id && q
+        ...(includeInactive ? {} : { isActive: true }),
+        ...(q
           ? {
               OR: [
                 { name: { contains: q, mode: "insensitive" } },
@@ -600,78 +743,60 @@ export class LighterTripsService {
             }
           : {})
       },
-      orderBy: [{ name: "asc" }],
-      take: limit,
-      select: { id: true, name: true, imoNo: true, flag: true }
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true, name: true, imoNo: true, flag: true, isActive: true }
     });
 
-    if (!vessels.length) {
-      return [];
-    }
-
-    const releasedForReuse: LighterTripStatus[] = [
-      LighterTripStatus.UNLOADED,
-      LighterTripStatus.CLOSED,
-      LighterTripStatus.CANCELLED
-    ];
-    const hullIds = vessels.map((v) => v.id);
-    const activeTrips = await this.prisma.lighterTrip.findMany({
-      where: {
-        lighterVesselId: { in: hullIds },
-        deletedAt: null,
-        status: { notIn: releasedForReuse }
-      },
-      orderBy: [{ assignedAt: "desc" }, { id: "desc" }],
-      select: {
-        id: true,
-        tripNo: true,
-        status: true,
-        lighterVesselId: true,
-        vesselCall: {
-          select: {
-            id: true,
-            callNo: true,
-            vessel: { select: { name: true } }
-          }
-        }
-      }
-    });
-
-    const activeByHull = new Map<string, (typeof activeTrips)[0]>();
-    for (const t of activeTrips) {
-      if (!activeByHull.has(t.lighterVesselId)) {
-        activeByHull.set(t.lighterVesselId, t);
-      }
-    }
-
-    return vessels.map((v) => {
-      const t = activeByHull.get(v.id);
-      return {
-        ...v,
-        activeTrip: t
-          ? {
-              id: t.id,
-              tripNo: t.tripNo,
-              status: t.status,
-              vesselCall: t.vesselCall
-            }
-          : null
-      };
-    });
+    const nextCursor = vessels.length > limit ? vessels[limit].id : null;
+    const slice = vessels.slice(0, limit);
+    const data = await enrichWithActiveTrips(slice);
+    return { data, nextCursor, limit };
   }
 
-  private async allocateTripNo(): Promise<string> {
-    for (let i = 0; i < 8; i += 1) {
-      const tripNo = `LT-${new Date().getFullYear()}-${randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
-      const clash = await this.prisma.lighterTrip.findFirst({
-        where: { tripNo },
-        select: { id: true }
-      });
-      if (!clash) {
-        return tripNo;
-      }
+  /**
+   * `YY-MM-DD-{motherHull}-{lighterHull}-{seq}` (Asia/Dhaka day; seq = trips that day for this
+   * mother call + lighter hull, excluding soft-deleted rows).
+   */
+  private async allocateTripNo(
+    tx: Prisma.TransactionClient,
+    params: { motherVesselCallId: string; lighterVesselId: string }
+  ): Promise<string> {
+    const vc = await tx.vesselCall.findFirst({
+      where: { id: params.motherVesselCallId },
+      select: { vessel: { select: { hullDisplayCode: true } } }
+    });
+    const lighter = await tx.vessel.findFirst({
+      where: { id: params.lighterVesselId, isLighter: true },
+      select: { hullDisplayCode: true }
+    });
+    const motherCode = vc?.vessel.hullDisplayCode ?? 0;
+    const lighterCode = lighter?.hullDisplayCode ?? 0;
+    if (motherCode <= 0 || !vc) {
+      throw new BadRequestException(
+        "Mother vessel call is missing a hull registry number. Repair master data for the mother hull."
+      );
     }
-    throw new BadRequestException("Could not allocate a unique trip number");
+    if (lighterCode <= 0 || !lighter) {
+      throw new BadRequestException(
+        "Lighter hull is missing a registry number. Repair master data for the lighter."
+      );
+    }
+
+    const nowDhaka = DateTime.now().setZone(OPS_TIME_ZONE);
+    const dateSeg = formatOpsDateSegment(nowDhaka);
+    const { startUtc, endExclusiveUtc } = dhakaDayBounds(nowDhaka);
+    const count = await tx.lighterTrip.count({
+      where: {
+        vesselCallId: params.motherVesselCallId,
+        lighterVesselId: params.lighterVesselId,
+        deletedAt: null,
+        createdAt: { gte: startUtc, lt: endExclusiveUtc }
+      }
+    });
+    const seq = count + 1;
+    return buildLighterTripNo(dateSeg, motherCode, lighterCode, seq);
   }
 
   private async allocateAssignmentNo(): Promise<string> {
@@ -796,6 +921,23 @@ export class LighterTripsService {
     return ghat.id;
   }
 
+  /** `lighterPortCallId` must be a `VesselCall` row for the same active lighter hull as `lighterHullId`. */
+  private async assertLighterPortCallMatchesHull(lighterPortCallId: string, lighterHullId: string) {
+    const call = await this.prisma.vesselCall.findFirst({
+      where: {
+        id: lighterPortCallId,
+        vesselId: lighterHullId,
+        vessel: { isLighter: true, isActive: true }
+      },
+      select: { id: true }
+    });
+    if (!call) {
+      throw new BadRequestException(
+        "lighterPortCallId must be a vessel call for the same active lighter hull as lighterVesselId"
+      );
+    }
+  }
+
   async create(dto: CreateLighterTripDto, assignedById: string | undefined) {
     const assignmentId = dto.lighterAssignmentId?.trim();
     const vesselCallId = dto.vesselCallId?.trim();
@@ -888,51 +1030,77 @@ export class LighterTripsService {
       );
     }
 
-    const tripNo = await this.allocateTripNo();
-    return this.prisma.$transaction(async (tx) => {
-      const trip = await tx.lighterTrip.create({
-        data: {
-          tripNo,
-          vesselCallId: assignment.vesselCallId,
-          lighterAssignmentId: assignment.id,
-          lighterVesselId: dto.lighterVesselId,
-          assignedById: assignedById ?? null,
-          status: LighterTripStatus.PLANNED,
-          remarks: dto.remarks ?? null
+    let resolvedLighterPortCallId: string | null = null;
+    const rawPort = dto.lighterPortCallId?.trim();
+    if (rawPort) {
+      await this.assertLighterPortCallMatchesHull(rawPort, dto.lighterVesselId);
+      resolvedLighterPortCallId = rawPort;
+    }
+
+    const maxTripAttempts = 12;
+    let lastTripErr: unknown;
+    for (let attempt = 0; attempt < maxTripAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const tripNo = await this.allocateTripNo(tx, {
+            motherVesselCallId: assignment.vesselCallId,
+            lighterVesselId: dto.lighterVesselId
+          });
+          const trip = await tx.lighterTrip.create({
+            data: {
+              tripNo,
+              vesselCallId: assignment.vesselCallId,
+              lighterAssignmentId: assignment.id,
+              lighterVesselId: dto.lighterVesselId,
+              lighterPortCallId: resolvedLighterPortCallId,
+              assignedById: assignedById ?? null,
+              status: LighterTripStatus.PLANNED,
+              remarks: dto.remarks ?? null
+            }
+          });
+          await tx.lighterTripEvent.create({
+            data: {
+              tripId: trip.id,
+              statusAfter: LighterTripStatus.PLANNED,
+              remarks: "Trip created from carrier assignment"
+            }
+          });
+          await tx.lighterAssignment.update({
+            where: { id: assignment.id },
+            data: buildLighterAssignmentSyncData({
+              status: LighterTripStatus.PLANNED,
+              wayToMVReadyAt: null,
+              wayToMVStartedAt: null,
+              wayToMVCompletedAt: null,
+              alongsideDate: null,
+              loadingStartedAt: null,
+              loadingCompletedAt: null,
+              departedMvDate: null,
+              arrivedGhatDate: null,
+              unloadStartedAt: null,
+              unloadCompletedAt: null
+            })
+          });
+          const out = await tx.lighterTrip.findFirst({
+            where: { id: trip.id },
+            include: LIGHTER_TRIP_DETAIL_INCLUDE
+          });
+          if (!out) {
+            throw new NotFoundException("Lighter trip was not found after create");
+          }
+          return out;
+        });
+      } catch (e: unknown) {
+        lastTripErr = e;
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          continue;
         }
-      });
-      await tx.lighterTripEvent.create({
-        data: {
-          tripId: trip.id,
-          statusAfter: LighterTripStatus.PLANNED,
-          remarks: "Trip created from carrier assignment"
-        }
-      });
-      await tx.lighterAssignment.update({
-        where: { id: assignment.id },
-        data: buildLighterAssignmentSyncData({
-          status: LighterTripStatus.PLANNED,
-          wayToMVReadyAt: null,
-          wayToMVStartedAt: null,
-          wayToMVCompletedAt: null,
-          alongsideDate: null,
-          loadingStartedAt: null,
-          loadingCompletedAt: null,
-          departedMvDate: null,
-          arrivedGhatDate: null,
-          unloadStartedAt: null,
-          unloadCompletedAt: null
-        })
-      });
-      const out = await tx.lighterTrip.findFirst({
-        where: { id: trip.id },
-        include: LIGHTER_TRIP_DETAIL_INCLUDE
-      });
-      if (!out) {
-        throw new NotFoundException("Lighter trip was not found after create");
+        throw e;
       }
-      return out;
-    });
+    }
+    throw lastTripErr instanceof Error
+      ? lastTripErr
+      : new BadRequestException("Could not allocate a unique trip number");
   }
 
   private parseOptionalMtDecimal(
@@ -960,7 +1128,7 @@ export class LighterTripsService {
           .map((s) => s.trim())
           .filter(Boolean)
       )
-    ].slice(0, 40);
+    ].slice(0, MAX_DISCHARGE_METRICS_VESSEL_CALL_IDS);
     if (!vesselCallIds.length) {
       return { byVesselCallId: {} as Record<string, ReturnType<typeof aggregateBoardMetrics>> };
     }

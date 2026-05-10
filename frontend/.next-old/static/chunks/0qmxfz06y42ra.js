@@ -1,1 +1,0 @@
-(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,18979,t=>{"use strict";var e=t.i(48277),o=t.i(96086),r=t.i(54434);t.s(["default",0,function(){let t=(0,o.useParams)().id;return t?(0,e.jsx)(r.ImportContractLaytimeForm,{contractId:t,embedded:!1}):null}])}]);

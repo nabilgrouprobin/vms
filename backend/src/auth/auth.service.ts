@@ -3,6 +3,7 @@ import { AppRole } from "@prisma/client";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
 
+import { bdPhoneLoginVariants } from "../lib/bd-phone-variants";
 import { PrismaService } from "../prisma/prisma.service";
 import { SignupDto } from "./dto/signup.dto";
 
@@ -20,11 +21,17 @@ export class AuthService {
 
   async login(login: string, password: string) {
     const loginRaw = login.trim();
-    const user = await this.prisma.user.findFirst({
+    const loginEmail = loginRaw.includes("@") ? loginRaw.toLowerCase() : null;
+    const phoneVariants = bdPhoneLoginVariants(loginRaw);
+
+    const candidates = await this.prisma.user.findMany({
       where: {
         deletedAt: null,
         isActive: true,
-        phone: loginRaw
+        OR: [
+          ...(phoneVariants.length > 0 ? [{ phone: { in: phoneVariants } }] : []),
+          ...(loginEmail ? [{ email: loginEmail }] : [])
+        ]
       },
       select: {
         id: true,
@@ -36,14 +43,26 @@ export class AuthService {
       }
     });
 
-    if (!user?.passwordHash) {
+    type Cand = (typeof candidates)[number];
+    const passwordMatches: Cand[] = [];
+    for (const c of candidates) {
+      if (!c.passwordHash) {
+        continue;
+      }
+      const ok = await bcrypt.compare(password, c.passwordHash);
+      if (ok) {
+        passwordMatches.push(c);
+      }
+    }
+
+    if (passwordMatches.length === 0) {
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      throw new UnauthorizedException("Invalid credentials");
-    }
+    const user =
+      passwordMatches.length === 1
+        ? passwordMatches[0]
+        : await this.pickLoginUserWhenAmbiguous(loginRaw, loginEmail, passwordMatches);
 
     const now = new Date();
     const assignments = await this.prisma.userRoleAssignment.findMany({
@@ -58,7 +77,57 @@ export class AuthService {
       throw new UnauthorizedException("No roles assigned; contact administrator");
     }
 
-    return this.issueSession(user, assignments.map((a) => a.role));
+    const roles = [...new Set(assignments.map((a) => a.role))];
+    return this.issueSession(user, roles);
+  }
+
+  /** Same logical phone may exist as `01…` and `+880…` (unique per string); prefer the account with active roles. */
+  private async pickLoginUserWhenAmbiguous(
+    loginRaw: string,
+    loginEmail: string | null,
+    passwordMatches: {
+      id: string;
+      email: string | null;
+      phone: string;
+      fullName: string;
+      passwordHash: string | null;
+      organizationId: string | null;
+    }[]
+  ) {
+    const now = new Date();
+    const assignRows = await this.prisma.userRoleAssignment.findMany({
+      where: {
+        userId: { in: passwordMatches.map((u) => u.id) },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+      },
+      select: { userId: true }
+    });
+    const countBy = new Map<string, number>();
+    for (const row of assignRows) {
+      countBy.set(row.userId, (countBy.get(row.userId) ?? 0) + 1);
+    }
+
+    const scored = passwordMatches.map((u) => ({
+      u,
+      n: countBy.get(u.id) ?? 0,
+      exactPhone: u.phone === loginRaw ? 1 : 0,
+      exactEmail: loginEmail && u.email?.toLowerCase() === loginEmail ? 1 : 0
+    }));
+
+    scored.sort((a, b) => {
+      if (b.n !== a.n) {
+        return b.n - a.n;
+      }
+      if (b.exactPhone !== a.exactPhone) {
+        return b.exactPhone - a.exactPhone;
+      }
+      if (b.exactEmail !== a.exactEmail) {
+        return b.exactEmail - a.exactEmail;
+      }
+      return a.u.id.localeCompare(b.u.id);
+    });
+
+    return scored[0].u;
   }
 
   async signup(dto: SignupDto) {

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, SOFScope } from "@prisma/client";
 
+import { MAX_SOF_OPTION_LIST_ROWS } from "../../lib/limits";
 import { PrismaService } from "../../prisma/prisma.service";
 
 @Injectable()
@@ -94,12 +95,13 @@ export class SofRepository {
         lighterVessel: { isLighter: true }
       },
       orderBy: [{ assignedAt: "desc" }, { id: "desc" }],
-      take: 100,
+      take: MAX_SOF_OPTION_LIST_ROWS,
       select: {
         id: true,
         tripNo: true,
         status: true,
         assignedAt: true,
+        lighterPortCallId: true,
         lighterVessel: { select: { id: true, name: true } },
         vesselCall: {
           select: {
@@ -173,11 +175,12 @@ export class SofRepository {
     return this.prisma.vesselCall.findMany({
       where: {
         vessel: {
-          isMotherVessel: true
+          isMotherVessel: true,
+          isActive: true
         }
       },
       orderBy: [{ eta: "desc" }, { id: "desc" }],
-      take: 100,
+      take: MAX_SOF_OPTION_LIST_ROWS,
       select: {
         id: true,
         callNo: true,
@@ -208,7 +211,7 @@ export class SofRepository {
         isActive: true
       },
       orderBy: [{ fullName: "asc" }, { id: "asc" }],
-      take: 100,
+      take: MAX_SOF_OPTION_LIST_ROWS,
       select: {
         id: true,
         fullName: true,
@@ -248,8 +251,7 @@ export class SofRepository {
   findActiveSofEventTypeDefinition(id: string) {
     return this.prisma.sofEventTypeDefinition.findFirst({
       where: { id, deletedAt: null, isActive: true },
-      // `category` requires `npx prisma generate` after pulling this change.
-      select: { id: true, scope: true, category: true } as never
+      select: { id: true, scope: true, category: true }
     }) as Promise<
       | {
           id: string;
@@ -556,6 +558,7 @@ export class SofRepository {
           alongsideDate: true,
           loadingCompletedAt: true,
           arrivedGhatDate: true,
+          lighterPortCallId: true,
           lighterVessel: {
             select: {
               id: true,
@@ -607,7 +610,7 @@ export class SofRepository {
           hourlyStatuses: true
         }
       }
-    };
+    } satisfies Prisma.StatementOfFactsSelect;
   }
 
   private getLighterVesselSofInclude(): Prisma.StatementOfFactsInclude {

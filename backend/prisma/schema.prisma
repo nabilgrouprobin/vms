@@ -2394,6 +2394,8 @@ model Vessel {
   yearBuilt      Int?     @map("year_built")
   isMotherVessel Boolean  @default(false) @map("is_mother_vessel")
   isLighter      Boolean  @default(false) @map("is_lighter")
+  /// Monotonic registry id (3-digit in call/trip numbers). Unique across mother + lighter hulls.
+  hullDisplayCode Int      @unique @default(0) @map("hull_display_code")
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
@@ -2469,7 +2471,8 @@ model VesselCall {
   updatedBy                User?                        @relation("CallUpdatedBy", fields: [updatedById], references: [id])
   cargoLines               VesselCargoLine[]
   lcReleases               LcRelease[]
-  lighterTrips             LighterTrip[]
+  lighterTrips             LighterTrip[] @relation("LighterTripMotherCall")
+  lighterPortTrips        LighterTrip[] @relation("LighterTripLighterPortCall")
   statementOfFacts         StatementOfFacts?
   dailyDischarges          MotherVesselDailyDischarge[]
   lighterAssignments       LighterAssignment[]
@@ -2889,6 +2892,8 @@ model LighterTrip {
   id                     String              @id @default(cuid())
   tripNo                 String              @unique @map("trip_no")
   vesselCallId           String              @map("vessel_call_id")
+  /// Optional lighter-hull **port visit** (`VesselCall` where vessel is a lighter); for deep-links and ops context.
+  lighterPortCallId      String?             @map("lighter_port_call_id")
   lighterAssignmentId    String?             @unique @map("lighter_assignment_id")
   lighterVesselId        String              @map("lighter_vessel_id")
   assignedById           String?             @map("assigned_by_id")
@@ -2931,7 +2936,8 @@ model LighterTrip {
   createdAt              DateTime            @default(now()) @map("created_at")
   updatedAt              DateTime            @updatedAt @map("updated_at")
 
-  vesselCall         VesselCall          @relation(fields: [vesselCallId], references: [id])
+  vesselCall         VesselCall          @relation("LighterTripMotherCall", fields: [vesselCallId], references: [id])
+  lighterPortCall    VesselCall?         @relation("LighterTripLighterPortCall", fields: [lighterPortCallId], references: [id])
   lighterAssignment  LighterAssignment?  @relation(fields: [lighterAssignmentId], references: [id])
   lighterVessel      Vessel              @relation(fields: [lighterVesselId], references: [id])
   assignedBy         User?               @relation("TripAssignedBy", fields: [assignedById], references: [id])
@@ -2947,6 +2953,7 @@ model LighterTrip {
   draftSurveys       DraftSurvey[]
 
   @@index([vesselCallId])
+  @@index([lighterPortCallId])
   @@index([lighterVesselId])
   @@index([status, createdAt])
   @@index([tripNo])

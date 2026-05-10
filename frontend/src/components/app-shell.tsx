@@ -3,6 +3,7 @@
 import {
   Anchor,
   Calculator,
+  CalendarClock,
   ClipboardList,
   Database,
   LayoutDashboard,
@@ -18,9 +19,10 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
+import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,9 +33,11 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { clearSession, getUserProfile, type StoredUserProfile } from "@/lib/auth-storage";
+import type { StoredUserProfile } from "@/lib/auth-storage";
 import {
+  isTripsWorkspaceNavPath,
   isVesselSofWorkspaceNavPath,
+  preserveTripsWorkspaceQuery,
   preserveVesselSofWorkspaceQuery
 } from "@/lib/workspace-paths";
 import { cn } from "@/lib/utils";
@@ -53,6 +57,12 @@ const nav: Array<{
     label: "Trips",
     icon: Route,
     isActive: (p) => p === "/trips" || p.startsWith("/trips/")
+  },
+  {
+    path: "/vessel-calls",
+    label: "Vessel calls",
+    icon: CalendarClock,
+    isActive: (p) => p === "/vessel-calls" || p.startsWith("/vessel-calls/")
   },
   {
     path: "/reports",
@@ -86,7 +96,9 @@ function NavLinksInner({ onNavigate }: { onNavigate?: () => void }) {
             : pathname === path || pathname.startsWith(`${path}/`);
         const href = isVesselSofWorkspaceNavPath(path)
           ? preserveVesselSofWorkspaceQuery(path, searchParams)
-          : path;
+          : isTripsWorkspaceNavPath(path)
+            ? preserveTripsWorkspaceQuery(path, searchParams)
+            : path;
         return (
           <Link
             key={path}
@@ -135,7 +147,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function AccountMenu({ profile }: { profile: StoredUserProfile | null }) {
-  const router = useRouter();
+  const { signOut } = useAuth();
   if (!profile) {
     return (
       <Button variant="outline" size="sm" asChild>
@@ -167,11 +179,7 @@ function AccountMenu({ profile }: { profile: StoredUserProfile | null }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="text-destructive focus:text-destructive"
-          onClick={() => {
-            clearSession();
-            router.replace("/login");
-            router.refresh();
-          }}
+          onClick={signOut}
         >
           <LogOut className="mr-2 size-4" />
           Sign out
@@ -226,12 +234,8 @@ function ThemeMenu() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const [profile, setProfile] = useState<StoredUserProfile | null>(null);
+  const { profile } = useAuth();
   const isAuthPage = pathname === "/login" || pathname === "/signup";
-
-  useEffect(() => {
-    setProfile(getUserProfile());
-  }, [pathname]);
 
   return (
     <div className="min-h-screen flex flex-col">

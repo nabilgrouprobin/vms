@@ -1,4 +1,10 @@
-import { api } from "@/lib/api";
+import { api, apiValidated } from "@/lib/api";
+import {
+  lighterSofChipPeekSchema,
+  motherSofChipPeekSchema,
+  type LighterSofChipPeekSchema,
+  type MotherSofChipPeekSchema
+} from "@/lib/api-schemas";
 import type {
   LighterSofListRow,
   MotherSofListRow,
@@ -6,6 +12,9 @@ import type {
   SofEventListItem,
   SofOptions
 } from "@/types/vms";
+
+export type MotherSofChipPeek = MotherSofChipPeekSchema;
+export type LighterSofChipPeek = LighterSofChipPeekSchema;
 
 const prefix = "/sof";
 
@@ -32,6 +41,14 @@ export function fetchMotherSofs(params: {
 
 export function fetchMotherSof(id: string) {
   return api<unknown>(`${prefix}/mother-vessels/${id}`);
+}
+
+/**
+ * Validated fetcher used by the workspace header chip — guarantees we only
+ * try to read `vesselCall.vessel.name` etc. when the backend really sent it.
+ */
+export function fetchMotherSofChipPeek(id: string) {
+  return apiValidated(`${prefix}/mother-vessels/${id}`, motherSofChipPeekSchema);
 }
 
 export function createMotherSof(body: Record<string, unknown>) {
@@ -115,6 +132,11 @@ export function fetchLighterSofs(params: {
 
 export function fetchLighterSof(id: string) {
   return api<unknown>(`${prefix}/lighter-vessels/${id}`);
+}
+
+/** Validated counterpart of `fetchMotherSofChipPeek` for the lighter scope. */
+export function fetchLighterSofChipPeek(id: string) {
+  return apiValidated(`${prefix}/lighter-vessels/${id}`, lighterSofChipPeekSchema);
 }
 
 export function createLighterSof(body: Record<string, unknown>) {

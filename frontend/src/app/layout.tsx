@@ -3,8 +3,10 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import { AppShell } from "@/components/app-shell";
 import { AuthGate } from "@/components/auth/auth-gate";
+import { AuthProvider } from "@/components/providers/auth-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { Toaster } from "@/components/ui/toaster";
 
 import "./globals.css";
 
@@ -36,9 +38,12 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <QueryProvider>
-            <AuthGate>
-              <AppShell>{children}</AppShell>
-            </AuthGate>
+            <AuthProvider>
+              <AuthGate>
+                <AppShell>{children}</AppShell>
+              </AuthGate>
+              <Toaster />
+            </AuthProvider>
           </QueryProvider>
         </ThemeProvider>
       </body>

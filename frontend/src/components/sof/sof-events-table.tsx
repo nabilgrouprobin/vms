@@ -13,6 +13,7 @@ import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inpu
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { formatDt } from "@/lib/format";
 import { parseApiErr } from "@/lib/parse-api-error";
+import { toast } from "@/lib/toast";
 import {
   formatDurationSpanMs,
   sofEventOwnWindow,
@@ -238,7 +239,7 @@ export function SofEventsTable({
       void qc.invalidateQueries({ queryKey: [...eventsQueryKey] });
       onEventsChanged?.();
     },
-    onError: (e) => alert(parseApiErr(e))
+    onError: (e) => toast.error(parseApiErr(e))
   });
 
   const editingType = useMemo(

@@ -5,7 +5,7 @@ export default function MotherVesselsMasterPage() {
     <MasterVesselCrudPage
       kind="mother"
       title="Mother vessel"
-      description="Mother hulls used for vessel calls and SOF. Use row Actions → Details for full registry (IMO, flag, DWT, dimensions). Delete deactivates the hull; Restore brings it back for pickers."
+      description="Mother hulls used for vessel calls and SOF. A hull alone does not appear in operational pickers until you add a port visit: use the Vessel calls screen (main menu). Delete deactivates the hull; Restore brings it back."
     />
   );
 }

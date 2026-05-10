@@ -14,7 +14,7 @@ import { SofDetailHeader } from "@/components/sof/detail/sof-detail-header";
 import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-tab";
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   ImportContractLaytimeForm,
   VesselCallImportContractLinkPanel
@@ -43,6 +43,7 @@ import {
 } from "@/lib/sof-event-display";
 import { fetchSofEventTypeOptions } from "@/lib/master-data-api";
 import { parseApiErr } from "@/lib/parse-api-error";
+import { toast } from "@/lib/toast";
 import { VESSEL_SOF_CLEAR_SELECTION_EVENT } from "@/lib/workspace-paths";
 import { patchVesselCall } from "@/lib/vessel-calls-api";
 import {
@@ -179,7 +180,7 @@ export function LighterSofDetailView({
       qc.invalidateQueries({ queryKey: ["lighter-sof"] });
       window.location.href = listHref;
     },
-    onError: (e) => alert(parseApiErr(e))
+    onError: (e) => toast.error(parseApiErr(e))
   });
 
   const [evType, setEvType] = useState("");
@@ -190,10 +191,11 @@ export function LighterSofDetailView({
   const [evErr, setEvErr] = useState<string | null>(null);
   const [addEventOpen, setAddEventOpen] = useState(false);
 
-  const currentUser = useMemo<SofAddEventCurrentUser | null>(() => {
-    const p = getUserProfile();
-    return p ? { id: p.id, fullName: p.fullName, email: p.email } : null;
-  }, []);
+  const profile = useUserProfile();
+  const currentUser = useMemo<SofAddEventCurrentUser | null>(
+    () => (profile ? { id: profile.id, fullName: profile.fullName, email: profile.email } : null),
+    [profile]
+  );
 
   useEffect(() => {
     const list = eventTypesQ.data;
@@ -239,7 +241,7 @@ export function LighterSofDetailView({
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
     },
-    onError: (e) => alert(parseApiErr(e))
+    onError: (e) => toast.error(parseApiErr(e))
   });
 
   const layRecalcMut = useMutation({
@@ -252,7 +254,7 @@ export function LighterSofDetailView({
       });
       void qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
     },
-    onError: (e) => alert(parseApiErr(e))
+    onError: (e) => toast.error(parseApiErr(e))
   });
 
   const addEvMut = useMutation({
@@ -279,8 +281,7 @@ export function LighterSofDetailView({
           : {}),
         remarks: evRemarks || undefined,
         isHold,
-        ...(isHold && evHoldReason.trim() ? { holdReason: evHoldReason.trim() } : {}),
-        createdBy: currentUser.id
+        ...(isHold && evHoldReason.trim() ? { holdReason: evHoldReason.trim() } : {})
       });
     },
     onSuccess: () => {

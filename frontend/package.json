@@ -6,6 +6,7 @@
     "dev": "node scripts/next-with-env-port.cjs dev",
     "build": "npx next build",
     "start": "node scripts/next-with-env-port.cjs start",
+    "lint": "eslint .",
     "test": "vitest run"
   },
   "dependencies": {
@@ -25,7 +26,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-window": "^2.2.7",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -38,6 +40,6 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.5"
   }
 }

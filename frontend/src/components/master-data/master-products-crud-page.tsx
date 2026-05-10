@@ -1,7 +1,7 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
 import { MasterDataCardHeader } from "@/components/master-data/master-data-card-header";
 import { MasterDataSearchFilters } from "@/components/master-data/master-data-search-filters";
@@ -14,13 +14,14 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Skeleton } from "@/components/ui/skeleton";
 import { MasterDataCsvToolbar } from "@/components/data-table/master-data-csv-toolbar";
 import { PaginationBar } from "@/components/data-table/pagination-bar";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   createMasterProduct,
   fetchMasterProducts,
   patchMasterProduct,
+  purgeMasterProduct,
   softDeleteMasterProduct
 } from "@/lib/master-data-api";
 import {
@@ -30,11 +31,12 @@ import {
 } from "@/lib/master-data-csv-bridge";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
-import { PRODUCT_TYPES, type MasterProductRow, type Paginated } from "@/types/vms";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
+import { PRODUCT_TYPES, type MasterProductRow } from "@/types/vms";
 
 export function MasterProductsCrudPage() {
-  const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const readOnly = !canEdit;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -59,37 +61,24 @@ export function MasterProductsCrudPage() {
     if (!sheetOpen) setFormError(null);
   }, [sheetOpen]);
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-products", debouncedSearch, includeInactive],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterProducts({
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive
-      }),
-    getNextPageParam: (last: Paginated<MasterProductRow>) => last.nextCursor ?? undefined
+  const {
+    listQ,
+    pager,
+    deleteM,
+    restoreM,
+    purgeM,
+    invalidateList,
+    runRowAction
+  } = useMasterCrud<MasterProductRow>({
+    queryKey: masterDataKeys.products(),
+    fetchList: fetchMasterProducts,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: softDeleteMasterProduct,
+    restore: (id) => patchMasterProduct(id, { isActive: true }),
+    purge: purgeMasterProduct
   });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
-  );
-
-  const listResetKey = useMemo(
-    () => `${debouncedSearch}\u0000${includeInactive ? "1" : "0"}`,
-    [debouncedSearch, includeInactive]
-  );
-
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
-  });
+  const rows = pager.pageItems;
 
   const openCreate = () => {
     setCreating(true);
@@ -137,20 +126,10 @@ export function MasterProductsCrudPage() {
       });
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-products"] });
+      await invalidateList();
       setSheetOpen(false);
     },
     onError: (e: unknown) => setFormError(parseApiErr(e))
-  });
-
-  const deleteM = useMutation({
-    mutationFn: (id: string) => softDeleteMasterProduct(id),
-    onSuccess: async () => qc.invalidateQueries({ queryKey: ["master-products"] })
-  });
-
-  const restoreM = useMutation({
-    mutationFn: (id: string) => patchMasterProduct(id, { isActive: true }),
-    onSuccess: async () => qc.invalidateQueries({ queryKey: ["master-products"] })
   });
 
   const onExportCsv = async () => {
@@ -161,7 +140,7 @@ export function MasterProductsCrudPage() {
         includeInactive
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -175,10 +154,10 @@ export function MasterProductsCrudPage() {
     try {
       const text = await file.text();
       const summary = await importProductsCsv(text);
-      await qc.invalidateQueries({ queryKey: ["master-products"] });
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      await invalidateList();
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -267,31 +246,46 @@ export function MasterProductsCrudPage() {
                             variant="destructive"
                             size="sm"
                             disabled={deleteM.isPending}
-                            onClick={() => {
-                              if (!window.confirm(`Delete (deactivate) product “${row.name}”?`)) return;
-                              deleteM.mutate(row.id, {
-                                onError: (e) => window.alert(parseApiErr(e))
-                              });
-                            }}
+                            onClick={() =>
+                              runRowAction(
+                                deleteM,
+                                row.id,
+                                `Delete (deactivate) product “${row.name}”?`
+                              )
+                            }
                           >
                             Delete
                           </Button>
                         ) : null}
                         {canEdit && !row.isActive ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            disabled={restoreM.isPending}
-                            onClick={() => {
-                              if (!window.confirm(`Restore product “${row.name}”?`)) return;
-                              restoreM.mutate(row.id, {
-                                onError: (e) => window.alert(parseApiErr(e))
-                              });
-                            }}
-                          >
-                            Restore
-                          </Button>
+                          <>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={restoreM.isPending}
+                              onClick={() =>
+                                runRowAction(restoreM, row.id, `Restore product “${row.name}”?`)
+                              }
+                            >
+                              Restore
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              disabled={purgeM.isPending}
+                              onClick={() =>
+                                runRowAction(
+                                  purgeM,
+                                  row.id,
+                                  `Permanently delete product “${row.name}”? This cannot be undone. It fails while cargoes, contracts, movements, or other records still reference this product.`
+                                )
+                              }
+                            >
+                              Delete forever
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </td>

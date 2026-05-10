@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { TripsAssignLighterSheet } from "@/components/trips/trips-assign-lighter-sheet";
 import { TripsAssignMotherSheet } from "@/components/trips/trips-assign-mother-sheet";
 import { TripsTripActivitySheet } from "@/components/trips/trips-trip-activity-sheet";
@@ -15,14 +16,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SelectedSofChip } from "@/components/workspace/mother-lighter-picker";
 import {
+  invalidateMotherLighterPickerCaches,
   ML_VESSEL_PICKER_QUERY_ROOT,
   MotherLighterVesselPickerPanel
 } from "@/components/workspace/mother-lighter-vessel-picker-panel";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import { fetchLighterTrips, fetchLighterVesselsForPicker, patchLighterTrip } from "@/lib/lighter-trips-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { canEditLighterTrips } from "@/lib/trips-permissions";
-import { fetchVesselCall } from "@/lib/vessel-calls-api";
+import { fetchVesselCall, fetchVesselCalls } from "@/lib/vessel-calls-api";
 import { applySearchParams, vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import type { LighterTripListRow } from "@/types/vms";
 
@@ -38,31 +40,27 @@ function TripsWorkspaceInner() {
   const searchParams = useSearchParams();
   const kind: "mother" | "lighter" = searchParams.get("kind") === "lighter" ? "lighter" : "mother";
   const vesselCallId = searchParams.get("vesselCallId")?.trim() ?? "";
-  const lighterVesselId = searchParams.get("lighterVesselId")?.trim() ?? "";
+  const lighterCallId = searchParams.get("lighterCallId")?.trim() ?? "";
+  const legacyLighterHullId = searchParams.get("lighterVesselId")?.trim() ?? "";
   const searchParamsSnapshot = searchParams.toString();
 
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignMotherOpen, setAssignMotherOpen] = useState(false);
   const [editTripId, setEditTripId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [activityTripId, setActivityTripId] = useState<string | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
-
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditLighterTrips(profile);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const setKind = (next: "mother" | "lighter") => {
     router.replace(
       applySearchParams(pathname, searchParams, {
         kind: next,
         vesselCallId: null,
+        lighterCallId: null,
         lighterVesselId: null,
         id: null,
         pickSof: null
@@ -76,6 +74,7 @@ function TripsWorkspaceInner() {
       applySearchParams(pathname, searchParams, {
         kind: "mother",
         vesselCallId: id,
+        lighterCallId: null,
         lighterVesselId: null,
         id: null,
         pickSof: null
@@ -84,11 +83,12 @@ function TripsWorkspaceInner() {
     );
   };
 
-  const selectLighter = (id: string) => {
+  const selectLighterCall = (callId: string) => {
     router.replace(
       applySearchParams(pathname, searchParams, {
         kind: "lighter",
-        lighterVesselId: id,
+        lighterCallId: callId,
+        lighterVesselId: null,
         vesselCallId: null,
         id: null,
         pickSof: null
@@ -102,24 +102,27 @@ function TripsWorkspaceInner() {
     const hasStaleId = searchParams.get("id");
     const hasStalePick = searchParams.get("pickSof");
     const hasCrossKind =
-      (kind === "mother" && !!lighterVesselId) || (kind === "lighter" && !!vesselCallId);
+      (kind === "mother" && (!!lighterCallId || !!legacyLighterHullId)) ||
+      (kind === "lighter" && !!vesselCallId);
     if (!hasStaleId && !hasStalePick && !hasCrossKind) return;
     router.replace(
       applySearchParams(pathname, searchParams, {
         id: null,
         pickSof: null,
         vesselCallId: kind === "mother" ? vesselCallId || null : null,
-        lighterVesselId: kind === "lighter" ? lighterVesselId || null : null
+        lighterCallId: kind === "lighter" ? lighterCallId || null : null,
+        lighterVesselId: kind === "lighter" ? legacyLighterHullId || null : null
       }),
       { scroll: false }
     );
-  }, [kind, vesselCallId, lighterVesselId, pathname, router, searchParamsSnapshot]);
+  }, [kind, vesselCallId, lighterCallId, legacyLighterHullId, pathname, router, searchParamsSnapshot]);
 
   /** Same pattern as vessel SOF `SelectedSofChip` — `Link` clears selection reliably under Suspense/Tabs. */
   const clearSelectionHref = useMemo(
     () =>
       applySearchParams(pathname, searchParams, {
         vesselCallId: null,
+        lighterCallId: null,
         lighterVesselId: null,
         id: null,
         pickSof: null
@@ -133,11 +136,51 @@ function TripsWorkspaceInner() {
     enabled: kind === "mother" && !!vesselCallId
   });
 
-  const lighterMetaQ = useQuery({
-    queryKey: ["lighter-hull-trips-meta", lighterVesselId],
+  const lighterCallMetaQ = useQuery({
+    queryKey: ["trips-lighter-call-meta", lighterCallId],
+    queryFn: () => fetchVesselCall(lighterCallId),
+    enabled: kind === "lighter" && !!lighterCallId
+  });
+
+  const lighterHullIdResolved = lighterCallMetaQ.data?.vessel.id ?? "";
+
+  const legacyLighterCallResolveQ = useQuery({
+    queryKey: ["trips-legacy-lighter-hull-to-call", legacyLighterHullId],
     queryFn: () =>
-      fetchLighterVesselsForPicker(undefined, 5, lighterVesselId).then((r) => r[0] ?? null),
-    enabled: kind === "lighter" && !!lighterVesselId
+      fetchVesselCalls({ hullKind: "lighter", vesselId: legacyLighterHullId, limit: 10 }),
+    enabled: kind === "lighter" && !lighterCallId && !!legacyLighterHullId
+  });
+
+  useEffect(() => {
+    if (kind !== "lighter" || lighterCallId || !legacyLighterHullId) return;
+    if (!legacyLighterCallResolveQ.isSuccess || legacyLighterCallResolveQ.isFetching) return;
+    const rows = legacyLighterCallResolveQ.data?.data ?? [];
+    if (rows.length === 0) return;
+    const chosen = rows[0]!;
+    router.replace(
+      applySearchParams(pathname, searchParams, {
+        lighterCallId: chosen.id,
+        lighterVesselId: null
+      }),
+      { scroll: false }
+    );
+  }, [
+    kind,
+    lighterCallId,
+    legacyLighterHullId,
+    legacyLighterCallResolveQ.isSuccess,
+    legacyLighterCallResolveQ.isFetching,
+    legacyLighterCallResolveQ.data,
+    pathname,
+    searchParamsSnapshot,
+    router
+  ]);
+
+  const lighterMetaQ = useQuery({
+    queryKey: ["lighter-hull-trips-meta", lighterHullIdResolved],
+    queryFn: () =>
+      fetchLighterVesselsForPicker({ id: lighterHullIdResolved, limit: 5 }).then((r) => r.data[0] ?? null),
+    enabled: kind === "lighter" && !!lighterHullIdResolved
   });
 
   const tripsMotherQ = useQuery({
@@ -147,9 +190,9 @@ function TripsWorkspaceInner() {
   });
 
   const tripsLighterQ = useQuery({
-    queryKey: ["trips-by-lighter-hull", lighterVesselId],
-    queryFn: () => fetchLighterTrips({ lighterVesselId, limit: 80 }),
-    enabled: kind === "lighter" && !!lighterVesselId
+    queryKey: ["trips-by-lighter-hull", lighterHullIdResolved],
+    queryFn: () => fetchLighterTrips({ lighterVesselId: lighterHullIdResolved, limit: 80 }),
+    enabled: kind === "lighter" && !!lighterHullIdResolved
   });
 
   const motherTitle =
@@ -166,9 +209,9 @@ function TripsWorkspaceInner() {
       ]
     : [];
 
-  const invalidateForLighter: Array<readonly string[]> = lighterVesselId
+  const invalidateForLighter: Array<readonly string[]> = lighterHullIdResolved
     ? [
-        ["trips-by-lighter-hull", lighterVesselId],
+        ["trips-by-lighter-hull", lighterHullIdResolved],
         ML_VESSEL_PICKER_QUERY_ROOT,
         ["lighter-hulls-picker"]
       ]
@@ -179,7 +222,7 @@ function TripsWorkspaceInner() {
     ...invalidateForLighter,
     ["lighter-hulls-picker"]
   ];
-  const hasSelection = kind === "mother" ? !!vesselCallId : !!lighterVesselId;
+  const hasSelection = kind === "mother" ? !!vesselCallId : !!lighterCallId;
   const selectedMotherTitle = motherMetaQ.data
     ? `${motherMetaQ.data.vessel.name}`
     : vesselCallId
@@ -190,10 +233,20 @@ function TripsWorkspaceInner() {
         motherMetaQ.data.cargoNameSnapshot ? ` · ${motherMetaQ.data.cargoNameSnapshot}` : ""
       }`
     : vesselCallId || "";
-  const selectedLighterTitle = lighterMetaQ.data?.name ?? (lighterVesselId ? "Selected lighter" : "");
-  const selectedLighterDetails = lighterMetaQ.data?.imoNo
-    ? `IMO ${lighterMetaQ.data.imoNo}`
-    : lighterVesselId || "";
+  const selectedLighterTitle =
+    lighterCallMetaQ.data != null
+      ? `${lighterCallMetaQ.data.callNo} · ${lighterCallMetaQ.data.vessel.name}`
+      : lighterCallId
+        ? "Lighter port call"
+        : "";
+  const selectedLighterDetails =
+    lighterCallMetaQ.data != null
+      ? `${lighterCallMetaQ.data.status}${
+          lighterCallMetaQ.data.cargoNameSnapshot
+            ? ` · ${lighterCallMetaQ.data.cargoNameSnapshot}`
+            : ""
+        }`
+      : lighterCallId || "";
   const lighterIsFree = (lighterMetaQ.data?.activeTrip ?? null) == null;
 
   const deleteM = useMutation({
@@ -206,8 +259,7 @@ function TripsWorkspaceInner() {
       for (const key of invalidateForTripSheets) {
         await qc.invalidateQueries({ queryKey: key });
       }
-      await qc.invalidateQueries({ queryKey: [...ML_VESSEL_PICKER_QUERY_ROOT] });
-      await qc.invalidateQueries({ queryKey: ["lighter-hulls-picker"] });
+      await invalidateMotherLighterPickerCaches(qc);
     }
   });
 
@@ -235,17 +287,16 @@ function TripsWorkspaceInner() {
         <MotherLighterVesselPickerPanel
           kind={kind}
           vesselCallId={vesselCallId}
-          lighterVesselId={lighterVesselId}
+          lighterCallId={lighterCallId}
           search={search}
           debouncedSearch={debouncedSearch}
           onSearchChange={setSearch}
           onKindChange={(next) => {
             setSearch("");
-            setDebouncedSearch("");
             setKind(next);
           }}
           onSelectMother={(row) => selectMother(row.id)}
-          onSelectLighter={(row) => selectLighter(row.id)}
+          onSelectLighter={(row) => selectLighterCall(row.id)}
           queriesEnabled={!hasSelection}
         />
       )}
@@ -306,7 +357,7 @@ function TripsWorkspaceInner() {
             )}
           </CardContent>
         </Card>
-      ) : kind === "lighter" && lighterVesselId ? (
+      ) : kind === "lighter" && lighterCallId && lighterHullIdResolved ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
@@ -317,11 +368,11 @@ function TripsWorkspaceInner() {
                 <p className="text-sm text-destructive">{parseApiErr(lighterMetaQ.error)}</p>
               ) : lighterMetaQ.data ? (
                 <p className="text-sm text-muted-foreground">
-                  Hull <span className="font-medium text-foreground">{lighterMetaQ.data.name}</span>
+                  Lighter <span className="font-medium text-foreground">{lighterMetaQ.data.name}</span>
                   {lighterMetaQ.data.imoNo ? ` · IMO ${lighterMetaQ.data.imoNo}` : ""}
                 </p>
               ) : (
-                <p className="text-sm text-destructive">Could not load this lighter hull.</p>
+                <p className="text-sm text-destructive">Could not load this lighter vessel.</p>
               )}
             </div>
             {canEdit ? (
@@ -337,8 +388,8 @@ function TripsWorkspaceInner() {
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <p className="mb-4 text-sm text-muted-foreground">
-              One lighter hull can only have one unfinished trip at a time. When the trip is
-              unloaded, closed, or cancelled, the hull can be assigned to another mother vessel from
+              One lighter vessel can only have one unfinished trip at a time. When the trip is
+              unloaded, closed, or cancelled, it can be assigned to another mother vessel from
               the mother view.
             </p>
             {tripsLighterQ.isLoading ? (
@@ -349,6 +400,7 @@ function TripsWorkspaceInner() {
               <TripsTable
                 rows={tripsLighterQ.data?.data ?? []}
                 mode="lighter"
+                lighterCallId={lighterCallId}
                 canEdit={canEdit}
                 onDelete={(id) => {
                   const ok = window.confirm(
@@ -379,7 +431,8 @@ function TripsWorkspaceInner() {
         motherTitle={motherTitle}
       />
       <TripsAssignMotherSheet
-        lighterVesselId={lighterVesselId}
+        lighterVesselId={lighterHullIdResolved}
+        lighterPortCallId={lighterCallId}
         open={assignMotherOpen}
         onOpenChange={setAssignMotherOpen}
         canEdit={canEdit}
@@ -403,6 +456,7 @@ function TripsWorkspaceInner() {
         }}
         invalidateKeys={invalidateForTripSheets}
       />
+
     </div>
   );
 }
@@ -410,6 +464,7 @@ function TripsWorkspaceInner() {
 function TripsTable({
   rows,
   mode,
+  lighterCallId,
   canEdit,
   onDelete,
   onEdit,
@@ -417,6 +472,8 @@ function TripsTable({
 }: {
   rows: LighterTripListRow[];
   mode: "mother" | "lighter";
+  /** When set (lighter tab with a port call selected), SOF deep links prefer `lighterCallId` over hull-only. */
+  lighterCallId?: string;
   canEdit: boolean;
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
@@ -427,7 +484,7 @@ function TripsTable({
       <p className="text-sm text-muted-foreground">
         {mode === "mother"
           ? "No lighter trips yet for this call. Use Assign lighter when you have open carrier allocations."
-          : "No trips found for this hull (including completed trips in history)."}
+          : "No trips found for this lighter (including completed trips in history)."}
       </p>
     );
   }
@@ -476,7 +533,11 @@ function TripsTable({
                   <Link
                     href={vesselSofWorkspacePath("overview", "lighter", {
                       id: t.statementOfFacts.id,
-                      lighterVesselId: t.lighterVessel.id
+                      ...(mode === "lighter" && lighterCallId
+                        ? { lighterCallId }
+                        : t.lighterPortCallId
+                          ? { lighterCallId: t.lighterPortCallId }
+                          : { lighterVesselId: t.lighterVessel.id })
                     })}
                     className="text-primary underline-offset-4 hover:underline"
                   >

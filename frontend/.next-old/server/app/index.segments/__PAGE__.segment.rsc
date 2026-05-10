@@ -1,5 +1,0 @@
-1:"$Sreact.fragment"
-2:I[64381,["/_next/static/chunks/0r9v47fmwnovn.js","/_next/static/chunks/0aptlu3z1f6l8.js","/_next/static/chunks/0jq1sc~6vsvic.js","/_next/static/chunks/0jprs_fd_n1y2.js","/_next/static/chunks/0wmkzrdkq9art.js","/_next/static/chunks/0vcrksslgowns.js"],"OutletBoundary"]
-3:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","div",null,{"className":"space-y-6","children":["$","div",null,{"children":[["$","h1",null,{"className":"text-2xl font-bold tracking-tight md:text-3xl","children":"Statement of Facts"}],["$","p",null,{"className":"mt-2 max-w-2xl text-muted-foreground","children":["Sign in with a backend user that has VMS roles. Point this app at your API via"," ",["$","code",null,{"className":"rounded bg-muted px-1.5 py-0.5 text-sm","children":"NEXT_PUBLIC_API_URL"}],"."]}]]}]}],null,["$","$L2",null,{"children":["$","$3",null,{"name":"Next.MetadataOutlet","children":"$@4"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"RiNl5j2QePqETuy6P_Nxg"}
-4:null

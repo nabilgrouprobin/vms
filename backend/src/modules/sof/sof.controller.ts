@@ -9,8 +9,10 @@ import {
   Query,
   UseGuards
 } from "@nestjs/common";
+
 import { SOFScope } from "@prisma/client";
 
+import { CurrentUserId } from "../../auth/decorators/current-user-id.decorator";
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
 import { Roles } from "../../auth/decorators/roles.decorator";
@@ -73,8 +75,12 @@ export class SofController {
 
   @Post("mother-vessels/:id/events")
   @Roles(...SOF_EDITOR_ROLES)
-  createSofEvent(@Param("id") id: string, @Body() dto: CreateSofEventDto) {
-    return this.sofService.createSofEvent(id, dto, SOFScope.MOTHER_VESSEL);
+  createSofEvent(
+    @Param("id") id: string,
+    @Body() dto: CreateSofEventDto,
+    @CurrentUserId() userId: string
+  ) {
+    return this.sofService.createSofEvent(id, dto, SOFScope.MOTHER_VESSEL, userId);
   }
 
   @Get("lighter-vessels")
@@ -112,8 +118,12 @@ export class SofController {
 
   @Post("lighter-vessels/:id/events")
   @Roles(...SOF_EDITOR_ROLES)
-  createLighterSofEvent(@Param("id") id: string, @Body() dto: CreateSofEventDto) {
-    return this.sofService.createSofEvent(id, dto, SOFScope.LIGHTER_VESSEL);
+  createLighterSofEvent(
+    @Param("id") id: string,
+    @Body() dto: CreateSofEventDto,
+    @CurrentUserId() userId: string
+  ) {
+    return this.sofService.createSofEvent(id, dto, SOFScope.LIGHTER_VESSEL, userId);
   }
 
   @Patch("events/:eventId")

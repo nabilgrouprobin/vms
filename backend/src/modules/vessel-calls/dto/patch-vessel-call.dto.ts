@@ -1,5 +1,13 @@
 import { MotherVesselStatus } from "@prisma/client";
-import { IsEnum, IsNumber, IsOptional, IsString, MaxLength, ValidateIf } from "class-validator";
+import {
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf
+} from "class-validator";
 
 export class PatchVesselCallDto {
   @IsOptional()
@@ -22,4 +30,24 @@ export class PatchVesselCallDto {
   @IsOptional()
   @IsEnum(MotherVesselStatus)
   status?: MotherVesselStatus;
+
+  /** Unique port-call reference; must stay unique across all vessel calls. */
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  callNo?: string;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsString()
+  @MaxLength(400)
+  cargoNameSnapshot?: string | null;
+
+  /** ISO 8601 date-time, or null to clear ETA. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsString()
+  @MaxLength(80)
+  eta?: string | null;
 }

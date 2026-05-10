@@ -103,7 +103,6 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
   const [status, setStatus] = useState<string>("DRAFT");
   const [layAllowed, setLayAllowed] = useState("");
   const [err, setErr] = useState<string | null>(null);
-
   const optionsQ = useSofOptionsQuery();
   const motherSofsQ = useQuery({
     queryKey: ["mother-sof", "availability-events"],
@@ -123,6 +122,9 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
       setSelectedId((prev) => prev ?? fromUrl);
     }
   }, [searchParams, variant]);
+
+  const lighterCallIdFromUrl = searchParams.get("lighterCallId")?.trim() ?? "";
+  const legacyLighterHullFromUrl = searchParams.get("lighterVesselId")?.trim() ?? "";
 
   const motherInUseByVesselCallId = useMemo(() => {
     const out = new Map<string, boolean>();
@@ -161,12 +163,22 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
     return out;
   }, [optionsQ.data]);
 
+  const lighterTripToPortCallId = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const t of optionsQ.data?.lighterTrips ?? []) {
+      const pid = t.lighterPortCallId?.trim();
+      if (pid) out.set(t.id, pid);
+    }
+    return out;
+  }, [optionsQ.data]);
+
   const copy =
     variant === "mother"
       ? {
           backHref: vesselSofWorkspacePath("overview", "mother"),
           pageTitle: "New mother vessel SOF",
-          pageDescription: "Choose a mother vessel call. Calls that already have a SOF are marked.",
+          pageDescription:
+            "Choose a mother vessel call (port visit). Register the hull under Master data, then add the visit under Vessel calls if it does not appear below.",
           cardTitle: "Vessel call",
           cardDescription: "Large lists use virtualized rows for smooth scrolling.",
           findLabel: "Find call",
@@ -176,7 +188,10 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
           invalidateKey: "mother-sof" as const
         }
       : {
-          backHref: vesselSofWorkspacePath("overview", "lighter"),
+          backHref: vesselSofWorkspacePath("overview", "lighter", {
+            lighterCallId: lighterCallIdFromUrl || null,
+            lighterVesselId: lighterCallIdFromUrl ? null : legacyLighterHullFromUrl || null
+          }),
           pageTitle: "New lighter vessel SOF",
           pageDescription:
             "Pick an active lighter trip for this call. Rows that already have a lighter SOF are labeled.",
@@ -215,10 +230,18 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
           );
           return;
         }
+        const lcResolved =
+          lighterCallIdFromUrl ||
+          (selectedId ? lighterTripToPortCallId.get(selectedId) : undefined) ||
+          "";
         router.push(
           vesselSofWorkspacePath("overview", "lighter", {
             id: d.id,
-            lighterVesselId: selectedId ? lighterTripToVesselId.get(selectedId) ?? null : null
+            lighterCallId: lcResolved || null,
+            lighterVesselId: lcResolved
+              ? null
+              : legacyLighterHullFromUrl ||
+                  (selectedId ? lighterTripToVesselId.get(selectedId) ?? null : null)
           })
         );
         return;
@@ -236,6 +259,11 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
         </Button>
         <h1 className="text-2xl font-bold tracking-tight">{copy.pageTitle}</h1>
         <p className="text-sm text-muted-foreground">{copy.pageDescription}</p>
+        {variant === "mother" ? (
+          <Button type="button" variant="outline" size="sm" className="mt-3" asChild>
+            <Link href="/vessel-calls">Vessel calls</Link>
+          </Button>
+        ) : null}
       </div>
 
       <Card>
@@ -308,6 +336,7 @@ export function NewVesselSofPage({ variant }: { variant: "mother" | "lighter" })
           </Button>
         </CardContent>
       </Card>
+
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
 import { MasterDataCardHeader } from "@/components/master-data/master-data-card-header";
 import { MasterDataSearchFilters } from "@/components/master-data/master-data-search-filters";
@@ -14,14 +14,15 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Skeleton } from "@/components/ui/skeleton";
 import { MasterDataCsvToolbar } from "@/components/data-table/master-data-csv-toolbar";
 import { PaginationBar } from "@/components/data-table/pagination-bar";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   createMasterGhat,
   fetchLocationOptions,
   fetchMasterGhats,
   patchMasterGhat,
+  purgeMasterGhat,
   softDeleteMasterGhat
 } from "@/lib/master-data-api";
 import {
@@ -31,21 +32,13 @@ import {
 } from "@/lib/master-data-csv-bridge";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
-import type { MasterGhatRow, Paginated } from "@/types/vms";
-
-function optNum(s: string, label: string): number | null {
-  const t = s.trim();
-  if (!t) return null;
-  const n = parseFloat(t);
-  if (!Number.isFinite(n)) {
-    throw new Error(`${label} must be a valid number.`);
-  }
-  return n;
-}
+import { optNum } from "@/lib/form-numbers";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
+import type { MasterGhatRow } from "@/types/vms";
 
 export function MasterGhatsCrudPage() {
-  const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const readOnly = !canEdit;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -82,37 +75,24 @@ export function MasterGhatsCrudPage() {
     if (!sheetOpen) setFormError(null);
   }, [sheetOpen]);
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-ghats", debouncedSearch, includeInactive],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterGhats({
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive
-      }),
-    getNextPageParam: (last: Paginated<MasterGhatRow>) => last.nextCursor ?? undefined
+  const {
+    listQ,
+    pager,
+    deleteM,
+    restoreM,
+    purgeM,
+    invalidateList,
+    runRowAction
+  } = useMasterCrud<MasterGhatRow>({
+    queryKey: masterDataKeys.ghats(),
+    fetchList: fetchMasterGhats,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: softDeleteMasterGhat,
+    restore: (id) => patchMasterGhat(id, { isActive: true }),
+    purge: purgeMasterGhat
   });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
-  );
-
-  const listResetKey = useMemo(
-    () => `${debouncedSearch}\u0000${includeInactive ? "1" : "0"}`,
-    [debouncedSearch, includeInactive]
-  );
-
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
-  });
+  const rows = pager.pageItems;
 
   const openCreate = () => {
     setCreating(true);
@@ -176,20 +156,10 @@ export function MasterGhatsCrudPage() {
       return patchMasterGhat(editing.id, { ...common, isActive });
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-ghats"] });
+      await invalidateList();
       setSheetOpen(false);
     },
     onError: (e: unknown) => setFormError(parseApiErr(e))
-  });
-
-  const deleteM = useMutation({
-    mutationFn: (id: string) => softDeleteMasterGhat(id),
-    onSuccess: async () => qc.invalidateQueries({ queryKey: ["master-ghats"] })
-  });
-
-  const restoreM = useMutation({
-    mutationFn: (id: string) => patchMasterGhat(id, { isActive: true }),
-    onSuccess: async () => qc.invalidateQueries({ queryKey: ["master-ghats"] })
   });
 
   const onExportCsv = async () => {
@@ -200,7 +170,7 @@ export function MasterGhatsCrudPage() {
         includeInactive
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -214,10 +184,10 @@ export function MasterGhatsCrudPage() {
     try {
       const text = await file.text();
       const summary = await importGhatsCsv(text);
-      await qc.invalidateQueries({ queryKey: ["master-ghats"] });
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      await invalidateList();
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -310,31 +280,40 @@ export function MasterGhatsCrudPage() {
                             variant="destructive"
                             size="sm"
                             disabled={deleteM.isPending}
-                            onClick={() => {
-                              if (!window.confirm(`Delete (deactivate) ghat “${row.name}”?`)) return;
-                              deleteM.mutate(row.id, {
-                                onError: (e) => window.alert(parseApiErr(e))
-                              });
-                            }}
+                            onClick={() =>
+                              runRowAction(deleteM, row.id, `Delete (deactivate) ghat “${row.name}”?`)
+                            }
                           >
                             Delete
                           </Button>
                         ) : null}
                         {canEdit && !row.isActive ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            disabled={restoreM.isPending}
-                            onClick={() => {
-                              if (!window.confirm(`Restore ghat “${row.name}”?`)) return;
-                              restoreM.mutate(row.id, {
-                                onError: (e) => window.alert(parseApiErr(e))
-                              });
-                            }}
-                          >
-                            Restore
-                          </Button>
+                          <>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={restoreM.isPending}
+                              onClick={() => runRowAction(restoreM, row.id, `Restore ghat “${row.name}”?`)}
+                            >
+                              Restore
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              disabled={purgeM.isPending}
+                              onClick={() =>
+                                runRowAction(
+                                  purgeM,
+                                  row.id,
+                                  `Permanently delete ghat “${row.name}”? This cannot be undone. It fails while unloadings, assignments, or stock movements still reference this ghat.`
+                                )
+                              }
+                            >
+                              Delete forever
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </td>

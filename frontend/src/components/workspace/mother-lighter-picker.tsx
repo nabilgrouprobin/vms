@@ -37,7 +37,7 @@ function MotherLighterKindTabs({
   return (
     <div
       role="tablist"
-      aria-label="Mother vessel or lighter"
+      aria-label="Mother vessel call or lighter port call"
       className={cn(
         "relative z-20 w-full rounded-xl border border-border/70 bg-muted/70 p-1 text-muted-foreground shadow-sm lg:w-auto lg:shrink-0",
         tabsListClass
@@ -55,7 +55,7 @@ function MotherLighterKindTabs({
         )}
         onClick={() => onKindChange("mother")}
       >
-        Mother vessel
+        Mother call
       </button>
       <button
         type="button"
@@ -69,7 +69,7 @@ function MotherLighterKindTabs({
         )}
         onClick={() => onKindChange("lighter")}
       >
-        Lighter
+        Lighter call
       </button>
     </div>
   );

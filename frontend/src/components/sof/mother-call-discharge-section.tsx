@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDt } from "@/lib/format";
 import { parseApiErr } from "@/lib/parse-api-error";
+import { toast } from "@/lib/toast";
 import {
   createDailyDischarge,
   deleteDailyDischarge,
@@ -101,7 +102,7 @@ function DischargeEditor({
                 remainingMt: rem || null
               })
                 .then(onSaved)
-                .catch((e) => alert(parseApiErr(e)))
+                .catch((e) => toast.error(parseApiErr(e)))
                 .finally(() => setBusy(false));
             }}
           >
@@ -117,7 +118,7 @@ function DischargeEditor({
                 setBusy(true);
                 deleteDailyDischarge(row.id)
                   .then(onSaved)
-                  .catch((e) => alert(parseApiErr(e)))
+                  .catch((e) => toast.error(parseApiErr(e)))
                   .finally(() => setBusy(false));
               }
             }}

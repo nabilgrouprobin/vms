@@ -44,7 +44,12 @@ export function parseOptionalDate(
 
 /** Matches frontend `sofEventWindow`: minutes preferred; else hours; else chain from previous end. */
 export type SofTimelineValidationRow = {
-  id: string;
+  /**
+   * Persisted DB id, or `null` for the *prospective* row currently being
+   * validated. Null ids sort last when two rows share an `eventTime`, which
+   * matches "the new event slots in after existing same-instant rows".
+   */
+  id: string | null;
   eventTime: Date;
   durationHours: Prisma.Decimal | null | undefined;
   durationMinutes?: number | null;
@@ -63,6 +68,18 @@ function positiveDurationHours(d: Prisma.Decimal | null | undefined): number | n
     return null;
   }
   return n;
+}
+
+/**
+ * Tie-breaker for two timeline rows with the same `eventTime`. A `null` id
+ * (the prospective new row) always sorts last so existing persisted rows
+ * keep their relative order.
+ */
+function compareTimelineId(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a.localeCompare(b);
 }
 
 function positiveDurationMinutes(m: number | null | undefined): number | null {
@@ -132,7 +149,7 @@ export function findTimelineSplitHost(
       b.startMs <= newStartMs &&
       newEndMs <= b.endMs &&
       (b.startMs < newStartMs || newEndMs < b.endMs);
-    if (strictlyInside) {
+    if (strictlyInside && r.id !== null) {
       matches.push({ hostId: r.id, hostStartMs: b.startMs, hostEndMs: b.endMs });
     }
   }
@@ -149,10 +166,10 @@ export function validateSofEventTimelineNoOverlap(rows: SofTimelineValidationRow
   }
 
   const sorted = [...rows].sort(
-    (a, b) => a.eventTime.getTime() - b.eventTime.getTime() || a.id.localeCompare(b.id)
+    (a, b) => a.eventTime.getTime() - b.eventTime.getTime() || compareTimelineId(a.id, b.id)
   );
 
-  type Window = { id: string; startMs: number; endMs: number };
+  type Window = { id: string | null; startMs: number; endMs: number };
   const windows: Window[] = [];
   let prevRowEndMs: number | null = null;
   for (const r of sorted) {
@@ -162,7 +179,7 @@ export function validateSofEventTimelineNoOverlap(rows: SofTimelineValidationRow
     windows.push({ id: r.id, startMs: b.startMs, endMs: b.endMs });
   }
 
-  windows.sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+  windows.sort((a, b) => a.startMs - b.startMs || compareTimelineId(a.id, b.id));
 
   for (let i = 1; i < windows.length; i++) {
     const prev = windows[i - 1];

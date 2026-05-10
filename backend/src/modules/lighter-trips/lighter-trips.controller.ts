@@ -1,6 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
-import type { Request } from "express";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards
+} from "@nestjs/common";
 
+import { CurrentUserId } from "../../auth/decorators/current-user-id.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
@@ -13,8 +22,6 @@ import { CreateLighterTripDto } from "./dto/create-lighter-trip.dto";
 import { ListLighterTripsQueryDto } from "./dto/list-lighter-trips.query.dto";
 import { UpdateLighterTripDto } from "./dto/update-lighter-trip.dto";
 import { LighterTripsService } from "./lighter-trips.service";
-
-type AuthedRequest = Request & { user?: { userId: string } };
 
 @Controller("lighter-trips")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,15 +51,23 @@ export class LighterTripsController {
   lighterVessels(
     @Query("search") search?: string,
     @Query("limit") limit?: string,
-    @Query("id") id?: string
+    @Query("cursor") cursor?: string,
+    @Query("id") id?: string,
+    @Query("includeInactive") includeInactive?: string
   ) {
-    return this.lighterTripsService.listLighterVesselsForPicker(search, limit, id);
+    return this.lighterTripsService.listLighterVesselsForPicker(
+      search,
+      limit,
+      id,
+      cursor,
+      includeInactive
+    );
   }
 
   @Post()
   @Roles(...LIGHTER_TRIP_EDITOR_ROLES)
-  create(@Body() dto: CreateLighterTripDto, @Req() req: AuthedRequest) {
-    return this.lighterTripsService.create(dto, req.user?.userId);
+  create(@Body() dto: CreateLighterTripDto, @CurrentUserId() userId: string) {
+    return this.lighterTripsService.create(dto, userId);
   }
 
   @Get(":id")
@@ -69,8 +84,7 @@ export class LighterTripsController {
   /** Approve the lighter SOF for this trip (SOF must be VERIFIED, etc.). */
   @Post(":id/approve-lighter-sof")
   @Roles(...LIGHTER_TRIP_EDITOR_ROLES)
-  approveLighterSof(@Param("id") id: string, @Req() req: AuthedRequest) {
-    const userId = req.user?.userId;
-    return this.sofService.approveLighterVesselSofForTrip(id, userId ?? "");
+  approveLighterSof(@Param("id") id: string, @CurrentUserId() userId: string) {
+    return this.sofService.approveLighterVesselSofForTrip(id, userId);
   }
 }

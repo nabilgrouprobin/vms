@@ -2,7 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException
+  NotFoundException,
 } from "@nestjs/common";
 import { Prisma, SofEventTypeScope, SOFScope, SOFStatus } from "@prisma/client";
 
@@ -28,6 +28,7 @@ import {
   validateSofEventTimelineNoOverlap,
   validateSofStatusTransition
 } from "./validators/sof.validator";
+import { PrismaService } from "../../prisma/prisma.service";
 import { LaytimeCalculationService } from "./laytime/laytime-calculation.service";
 import { SofRepository } from "./sof.repository";
 
@@ -35,7 +36,8 @@ import { SofRepository } from "./sof.repository";
 export class SofService {
   constructor(
     private readonly sofRepository: SofRepository,
-    private readonly laytimeCalculation: LaytimeCalculationService
+    private readonly laytimeCalculation: LaytimeCalculationService,
+    private readonly prisma: PrismaService
   ) {}
 
   async listMotherVesselSofs(
@@ -131,24 +133,9 @@ export class SofService {
     }
 
     const data: Prisma.StatementOfFactsUncheckedCreateInput = {
-      sofNo: dto.sofNo ?? this.generateSofNo(vesselCall.callNo),
+      ...this.buildSofCreateData(dto, dto.sofNo ?? this.generateSofNo(vesselCall.callNo)),
       scope: SOFScope.MOTHER_VESSEL,
-      vesselCallId: dto.vesselCallId,
-      startedAt: parseOptionalDate(dto.startedAt, "startedAt"),
-      completedAt: parseOptionalDate(dto.completedAt, "completedAt"),
-      status: dto.status ?? SOFStatus.DRAFT,
-      laytimeAllowedHours: this.toDecimal(dto.laytimeAllowedHours),
-      laytimeUsedHours: this.toDecimal(dto.laytimeUsedHours),
-      laytimeExcludedHours: this.toDecimal(dto.laytimeExcludedHours),
-      laytimeBalanceHours: this.toDecimal(dto.laytimeBalanceHours),
-      demurrageAmount: this.toDecimal(dto.demurrageAmount),
-      dispatchAmount: this.toDecimal(dto.dispatchAmount),
-      netAmount: this.toDecimal(dto.netAmount),
-      verifiedBy: dto.verifiedBy,
-      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
-      approvedBy: dto.approvedBy,
-      approvedAt: parseOptionalDate(dto.approvedAt, "approvedAt"),
-      remarks: dto.remarks
+      vesselCallId: dto.vesselCallId
     };
 
     return this.sofRepository.createMotherVesselSof(data);
@@ -156,54 +143,18 @@ export class SofService {
 
   async updateMotherVesselSof(id: string, dto: UpdateMotherVesselSofDto) {
     const currentSof = await this.getMotherVesselSof(id);
+    this.assertSofEditable(currentSof.status, dto.status);
 
-    if (currentSof.status === SOFStatus.CLOSED && dto.status !== SOFStatus.CLOSED) {
-      throw new ConflictException("Closed SOF records cannot be edited");
-    }
-
-    if (dto.status) {
-      validateSofStatusTransition(currentSof.status, dto.status);
-    }
-
-    const data: Prisma.StatementOfFactsUncheckedUpdateInput = {
-      sofNo: dto.sofNo,
-      startedAt: parseOptionalDate(dto.startedAt, "startedAt"),
-      completedAt: parseOptionalDate(dto.completedAt, "completedAt"),
-      status: dto.status,
-      laytimeAllowedHours: this.toNullableDecimal(dto.laytimeAllowedHours),
-      laytimeUsedHours: this.toNullableDecimal(dto.laytimeUsedHours),
-      laytimeExcludedHours: this.toNullableDecimal(dto.laytimeExcludedHours),
-      laytimeBalanceHours: this.toNullableDecimal(dto.laytimeBalanceHours),
-      laytimeCommenceAt: parseOptionalDate(dto.laytimeCommenceAt, "laytimeCommenceAt"),
-      demurrageAmount: this.toNullableDecimal(dto.demurrageAmount),
-      dispatchAmount: this.toNullableDecimal(dto.dispatchAmount),
-      netAmount: this.toNullableDecimal(dto.netAmount),
-      verifiedBy: dto.verifiedBy,
-      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
-      approvedBy: dto.approvedBy,
-      approvedAt: parseOptionalDate(dto.approvedAt, "approvedAt"),
-      remarks: dto.remarks
-    };
-
-    return this.sofRepository.updateMotherVesselSof(id, this.removeUndefined(data));
+    return this.sofRepository.updateMotherVesselSof(
+      id,
+      this.removeUndefined(this.buildSofUpdateData(dto))
+    );
   }
 
   async deleteMotherVesselSof(id: string) {
     const currentSof = await this.getMotherVesselSof(id);
-
-    if (currentSof.status === SOFStatus.CLOSED || currentSof.status === SOFStatus.APPROVED) {
-      throw new ConflictException("Approved or closed SOF records cannot be deleted");
-    }
-
-    try {
-      return await this.sofRepository.deleteMotherVesselSof(id);
-    } catch (error: any) {
-      this.throwPrismaConflict(
-        error,
-        "SOF cannot be deleted while related records still reference it"
-      );
-      throw error;
-    }
+    this.assertSofDeletable(currentSof.status);
+    return this.safeDeleteSof(() => this.sofRepository.deleteMotherVesselSof(id));
   }
 
   async listLighterVesselSofs(
@@ -294,25 +245,10 @@ export class SofService {
     }
 
     const data: Prisma.StatementOfFactsUncheckedCreateInput = {
-      sofNo: dto.sofNo ?? this.generateLighterSofNo(trip.tripNo),
+      ...this.buildSofCreateData(dto, dto.sofNo ?? this.generateLighterSofNo(trip.tripNo)),
       scope: SOFScope.LIGHTER_VESSEL,
       lighterTripId: dto.lighterTripId,
-      vesselCallId: null,
-      startedAt: parseOptionalDate(dto.startedAt, "startedAt"),
-      completedAt: parseOptionalDate(dto.completedAt, "completedAt"),
-      status: dto.status ?? SOFStatus.DRAFT,
-      laytimeAllowedHours: this.toDecimal(dto.laytimeAllowedHours),
-      laytimeUsedHours: this.toDecimal(dto.laytimeUsedHours),
-      laytimeExcludedHours: this.toDecimal(dto.laytimeExcludedHours),
-      laytimeBalanceHours: this.toDecimal(dto.laytimeBalanceHours),
-      demurrageAmount: this.toDecimal(dto.demurrageAmount),
-      dispatchAmount: this.toDecimal(dto.dispatchAmount),
-      netAmount: this.toDecimal(dto.netAmount),
-      verifiedBy: dto.verifiedBy,
-      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
-      approvedBy: dto.approvedBy,
-      approvedAt: parseOptionalDate(dto.approvedAt, "approvedAt"),
-      remarks: dto.remarks
+      vesselCallId: null
     };
 
     return this.sofRepository.createLighterVesselSof(data);
@@ -320,54 +256,18 @@ export class SofService {
 
   async updateLighterVesselSof(id: string, dto: UpdateLighterVesselSofDto) {
     const currentSof = await this.getLighterVesselSof(id);
+    this.assertSofEditable(currentSof.status, dto.status);
 
-    if (currentSof.status === SOFStatus.CLOSED && dto.status !== SOFStatus.CLOSED) {
-      throw new ConflictException("Closed SOF records cannot be edited");
-    }
-
-    if (dto.status) {
-      validateSofStatusTransition(currentSof.status, dto.status);
-    }
-
-    const data: Prisma.StatementOfFactsUncheckedUpdateInput = {
-      sofNo: dto.sofNo,
-      startedAt: parseOptionalDate(dto.startedAt, "startedAt"),
-      completedAt: parseOptionalDate(dto.completedAt, "completedAt"),
-      status: dto.status,
-      laytimeAllowedHours: this.toNullableDecimal(dto.laytimeAllowedHours),
-      laytimeUsedHours: this.toNullableDecimal(dto.laytimeUsedHours),
-      laytimeExcludedHours: this.toNullableDecimal(dto.laytimeExcludedHours),
-      laytimeBalanceHours: this.toNullableDecimal(dto.laytimeBalanceHours),
-      laytimeCommenceAt: parseOptionalDate(dto.laytimeCommenceAt, "laytimeCommenceAt"),
-      demurrageAmount: this.toNullableDecimal(dto.demurrageAmount),
-      dispatchAmount: this.toNullableDecimal(dto.dispatchAmount),
-      netAmount: this.toNullableDecimal(dto.netAmount),
-      verifiedBy: dto.verifiedBy,
-      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
-      approvedBy: dto.approvedBy,
-      approvedAt: parseOptionalDate(dto.approvedAt, "approvedAt"),
-      remarks: dto.remarks
-    };
-
-    return this.sofRepository.updateLighterVesselSof(id, this.removeUndefined(data));
+    return this.sofRepository.updateLighterVesselSof(
+      id,
+      this.removeUndefined(this.buildSofUpdateData(dto))
+    );
   }
 
   async deleteLighterVesselSof(id: string) {
     const currentSof = await this.getLighterVesselSof(id);
-
-    if (currentSof.status === SOFStatus.CLOSED || currentSof.status === SOFStatus.APPROVED) {
-      throw new ConflictException("Approved or closed SOF records cannot be deleted");
-    }
-
-    try {
-      return await this.sofRepository.deleteLighterVesselSof(id);
-    } catch (error: any) {
-      this.throwPrismaConflict(
-        error,
-        "SOF cannot be deleted while related records still reference it"
-      );
-      throw error;
-    }
+    this.assertSofDeletable(currentSof.status);
+    return this.safeDeleteSof(() => this.sofRepository.deleteLighterVesselSof(id));
   }
 
   async listSofEvents(
@@ -388,15 +288,24 @@ export class SofService {
     };
   }
 
-  async createSofEvent(statementId: string, dto: CreateSofEventDto, scope: SOFScope) {
+  async createSofEvent(statementId: string, dto: CreateSofEventDto, scope: SOFScope, actorUserId: string) {
     const sof = await this.requireStatementForScope(statementId, scope);
 
     if (sof.status === SOFStatus.CLOSED) {
       throw new ConflictException("Closed SOF records cannot receive new events");
     }
 
-    if (!dto.createdBy) {
-      throw new BadRequestException("createdBy is required");
+    let verifiedById: string | undefined = dto.verifiedBy?.trim() || undefined;
+    let verifiedAt = parseOptionalDate(dto.verifiedAt, "verifiedAt");
+    if (verifiedById) {
+      const verifier = await this.prisma.user.findFirst({
+        where: { id: verifiedById, deletedAt: null },
+        select: { id: true }
+      });
+      if (!verifier) {
+        verifiedById = undefined;
+        verifiedAt = undefined;
+      }
     }
 
     const eventTypeDef = await this.sofRepository.findActiveSofEventTypeDefinition(dto.eventTypeId);
@@ -432,9 +341,9 @@ export class SofService {
       referenceNo: dto.referenceNo,
       remarks: dto.remarks,
       supportingDocuments: dto.supportingDocuments ?? [],
-      createdBy: dto.createdBy,
-      verifiedBy: dto.verifiedBy,
-      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
+      createdBy: actorUserId,
+      verifiedBy: verifiedById,
+      verifiedAt,
       operationBatchId: dto.operationBatchId
     }) as Prisma.SofEventUncheckedCreateInput;
 
@@ -508,7 +417,7 @@ export class SofService {
           referenceNo: host.referenceNo,
           remarks: host.remarks,
           supportingDocuments: host.supportingDocuments ?? [],
-          createdBy: dto.createdBy,
+          createdBy: actorUserId,
           operationBatchId: host.operationBatchId
         }) as Prisma.SofEventUncheckedCreateInput;
       }
@@ -528,8 +437,10 @@ export class SofService {
         durationHours: r.durationHours,
         durationMinutes: r.durationMinutes
       })),
+      // `id: null` flags this as the prospective new row; the validator's
+      // tie-breaker sorts it after existing rows that share `eventTime`.
       {
-        id: "zzzzzzzzzzzzzzzzzzzzzzzz",
+        id: null,
         eventTime,
         durationHours: outHours ?? null,
         durationMinutes: outMinutes
@@ -943,6 +854,93 @@ export class SofService {
     const knownError = error as Prisma.PrismaClientKnownRequestError | null;
     if (knownError && (knownError.code === "P2002" || knownError.code === "P2003")) {
       throw new ConflictException(message);
+    }
+  }
+
+  /**
+   * Shared shape for `createMother...` / `createLighter...` SOF inserts.
+   *
+   * The two scopes (mother vs lighter) only differ on the foreign key
+   * (`vesselCallId` vs `lighterTripId`) and the `scope` enum — the rest of the
+   * laytime/demurrage/audit columns are identical. Each caller spreads this
+   * result and adds the scope-specific keys on top.
+   */
+  private buildSofCreateData(
+    dto: CreateMotherVesselSofDto | CreateLighterVesselSofDto,
+    sofNo: string
+  ): Omit<Prisma.StatementOfFactsUncheckedCreateInput, "scope" | "vesselCallId" | "lighterTripId"> {
+    return {
+      sofNo,
+      startedAt: parseOptionalDate(dto.startedAt, "startedAt"),
+      completedAt: parseOptionalDate(dto.completedAt, "completedAt"),
+      status: dto.status ?? SOFStatus.DRAFT,
+      laytimeAllowedHours: this.toDecimal(dto.laytimeAllowedHours),
+      laytimeUsedHours: this.toDecimal(dto.laytimeUsedHours),
+      laytimeExcludedHours: this.toDecimal(dto.laytimeExcludedHours),
+      laytimeBalanceHours: this.toDecimal(dto.laytimeBalanceHours),
+      demurrageAmount: this.toDecimal(dto.demurrageAmount),
+      dispatchAmount: this.toDecimal(dto.dispatchAmount),
+      netAmount: this.toDecimal(dto.netAmount),
+      verifiedBy: dto.verifiedBy,
+      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
+      approvedBy: dto.approvedBy,
+      approvedAt: parseOptionalDate(dto.approvedAt, "approvedAt"),
+      remarks: dto.remarks
+    };
+  }
+
+  /** Shared field map for `updateMother...` / `updateLighter...` SOF patches. */
+  private buildSofUpdateData(
+    dto: UpdateMotherVesselSofDto | UpdateLighterVesselSofDto
+  ): Prisma.StatementOfFactsUncheckedUpdateInput {
+    return {
+      sofNo: dto.sofNo,
+      startedAt: parseOptionalDate(dto.startedAt, "startedAt"),
+      completedAt: parseOptionalDate(dto.completedAt, "completedAt"),
+      status: dto.status,
+      laytimeAllowedHours: this.toNullableDecimal(dto.laytimeAllowedHours),
+      laytimeUsedHours: this.toNullableDecimal(dto.laytimeUsedHours),
+      laytimeExcludedHours: this.toNullableDecimal(dto.laytimeExcludedHours),
+      laytimeBalanceHours: this.toNullableDecimal(dto.laytimeBalanceHours),
+      laytimeCommenceAt: parseOptionalDate(dto.laytimeCommenceAt, "laytimeCommenceAt"),
+      demurrageAmount: this.toNullableDecimal(dto.demurrageAmount),
+      dispatchAmount: this.toNullableDecimal(dto.dispatchAmount),
+      netAmount: this.toNullableDecimal(dto.netAmount),
+      verifiedBy: dto.verifiedBy,
+      verifiedAt: parseOptionalDate(dto.verifiedAt, "verifiedAt"),
+      approvedBy: dto.approvedBy,
+      approvedAt: parseOptionalDate(dto.approvedAt, "approvedAt"),
+      remarks: dto.remarks
+    };
+  }
+
+  /** Reject mutating a CLOSED SOF (unless explicitly staying CLOSED) and validate the requested transition. */
+  private assertSofEditable(currentStatus: SOFStatus, nextStatus: SOFStatus | undefined): void {
+    if (currentStatus === SOFStatus.CLOSED && nextStatus !== SOFStatus.CLOSED) {
+      throw new ConflictException("Closed SOF records cannot be edited");
+    }
+    if (nextStatus) {
+      validateSofStatusTransition(currentStatus, nextStatus);
+    }
+  }
+
+  /** Reject deleting an APPROVED or CLOSED SOF — those have downstream financial dependencies. */
+  private assertSofDeletable(currentStatus: SOFStatus): void {
+    if (currentStatus === SOFStatus.CLOSED || currentStatus === SOFStatus.APPROVED) {
+      throw new ConflictException("Approved or closed SOF records cannot be deleted");
+    }
+  }
+
+  /** Wrap a repository delete with the standard FK/unique-conflict translation. */
+  private async safeDeleteSof<T>(deleteFn: () => Promise<T>): Promise<T> {
+    try {
+      return await deleteFn();
+    } catch (error: unknown) {
+      this.throwPrismaConflict(
+        error,
+        "SOF cannot be deleted while related records still reference it"
+      );
+      throw error;
     }
   }
 }

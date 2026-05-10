@@ -5,7 +5,7 @@ export default function LightersMasterPage() {
     <MasterVesselCrudPage
       kind="lighter"
       title="Lighter"
-      description="Lighter hulls used for trips and lighter SOF. Use Actions → Details for full technical fields. Delete deactivates; Restore re-enables pickers."
+      description="Lighter hull registry used for trips and lighter SOF. Port visits are managed under Vessel calls → Lighter. Use Actions → Details for full technical fields. Delete deactivates; Restore re-enables pickers."
     />
   );
 }

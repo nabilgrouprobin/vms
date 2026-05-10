@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException
-} from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
@@ -11,9 +7,13 @@ import { CreateMasterGhatDto } from "./dto/create-master-ghat.dto";
 import { ListMasterReferenceQueryDto } from "./dto/list-master-reference.query.dto";
 import { UpdateMasterGhatDto } from "./dto/update-master-ghat.dto";
 import { decString, toDecimalOrNull } from "./utils/decimal-json";
-
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
+import {
+  getMasterById,
+  hardDeleteMasterRecord,
+  listMasterPaginated,
+  softDeleteMasterRecord,
+  throwIfUniqueConflict
+} from "./utils/master-crud.helpers";
 
 const ghatSelect = {
   id: true,
@@ -37,62 +37,37 @@ const ghatSelect = {
 
 type GhatRow = Prisma.GhatGetPayload<{ select: typeof ghatSelect }>;
 
+const GHAT_LABEL = "Ghat";
+const GHAT_CONFLICT_MSG = "Another ghat already uses this code.";
+
+function mapGhat(row: GhatRow): GhatRow {
+  return {
+    ...row,
+    unloadingCapacityMtPerDay: decString(row.unloadingCapacityMtPerDay) as never,
+    warehouseCapacityMt: decString(row.warehouseCapacityMt) as never
+  };
+}
+
 @Injectable()
 export class MasterGhatsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
-
-  private mapGhat(row: GhatRow) {
-    return {
-      ...row,
-      unloadingCapacityMtPerDay: decString(row.unloadingCapacityMtPerDay),
-      warehouseCapacityMt: decString(row.warehouseCapacityMt)
-    };
-  }
-
-  async list(query: ListMasterReferenceQueryDto) {
-    const limit = this.parseLimit(query.limit);
-    const includeInactive = query.includeInactive === "true";
-    const search = query.search?.trim();
-
-    const where: Prisma.GhatWhereInput = {
-      ...(includeInactive ? {} : { isActive: true }),
-      ...(search
-        ? {
-            OR: [
-              { code: { contains: search, mode: "insensitive" } },
-              { name: { contains: search, mode: "insensitive" } }
-            ]
-          }
-        : {})
-    };
-
-    const rows = await this.prisma.ghat.findMany({
-      where,
-      orderBy: [{ code: "asc" }, { id: "asc" }],
-      take: limit + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      select: ghatSelect
+  list(query: ListMasterReferenceQueryDto) {
+    return listMasterPaginated<GhatRow, typeof ghatSelect, Prisma.GhatWhereInput>({
+      delegate: this.prisma.ghat,
+      query,
+      select: ghatSelect,
+      mapRow: mapGhat
     });
-
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
-    return {
-      data: rows.slice(0, limit).map((r) => this.mapGhat(r)),
-      nextCursor,
-      limit
-    };
   }
 
-  async getById(id: string) {
-    const row = await this.prisma.ghat.findFirst({ where: { id }, select: ghatSelect });
-    return row ? this.mapGhat(row) : null;
+  getById(id: string) {
+    return getMasterById<GhatRow, typeof ghatSelect>({
+      delegate: this.prisma.ghat,
+      id,
+      select: ghatSelect,
+      mapRow: mapGhat
+    });
   }
 
   async create(dto: CreateMasterGhatDto) {
@@ -128,11 +103,9 @@ export class MasterGhatsService {
         },
         select: ghatSelect
       });
-      return this.mapGhat(row);
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException("Another ghat already uses this code.");
-      }
+      return mapGhat(row);
+    } catch (e) {
+      throwIfUniqueConflict(e, GHAT_CONFLICT_MSG);
       throw e;
     }
   }
@@ -154,21 +127,11 @@ export class MasterGhatsService {
     }
 
     const data: Prisma.GhatUpdateInput = {};
-    if (dto.name !== undefined) {
-      data.name = dto.name.trim();
-    }
-    if (dto.locationId !== undefined) {
-      data.location = { connect: { id: dto.locationId } };
-    }
-    if (dto.numberOfJetties !== undefined) {
-      data.numberOfJetties = dto.numberOfJetties;
-    }
-    if (dto.hasWarehouseStorage !== undefined) {
-      data.hasWarehouseStorage = dto.hasWarehouseStorage;
-    }
-    if (dto.hasTruckScale !== undefined) {
-      data.hasTruckScale = dto.hasTruckScale;
-    }
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.locationId !== undefined) data.location = { connect: { id: dto.locationId } };
+    if (dto.numberOfJetties !== undefined) data.numberOfJetties = dto.numberOfJetties;
+    if (dto.hasWarehouseStorage !== undefined) data.hasWarehouseStorage = dto.hasWarehouseStorage;
+    if (dto.hasTruckScale !== undefined) data.hasTruckScale = dto.hasTruckScale;
     if (dto.workingStartHour !== undefined) {
       data.workingStartHour =
         dto.workingStartHour === null || dto.workingStartHour === ""
@@ -183,17 +146,13 @@ export class MasterGhatsService {
     }
     if (dto.contactPerson !== undefined) {
       data.contactPerson =
-        dto.contactPerson === null || dto.contactPerson === ""
-          ? null
-          : dto.contactPerson.trim();
+        dto.contactPerson === null || dto.contactPerson === "" ? null : dto.contactPerson.trim();
     }
     if (dto.contactNo !== undefined) {
       data.contactNo =
         dto.contactNo === null || dto.contactNo === "" ? null : dto.contactNo.trim();
     }
-    if (dto.isActive !== undefined) {
-      data.isActive = dto.isActive;
-    }
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.unloadingCapacityMtPerDay !== undefined) {
       data.unloadingCapacityMtPerDay = toDecimalOrNull(dto.unloadingCapacityMtPerDay);
     }
@@ -206,29 +165,19 @@ export class MasterGhatsService {
     }
 
     try {
-      const row = await this.prisma.ghat.update({
-        where: { id },
-        data,
-        select: ghatSelect
-      });
-      return this.mapGhat(row);
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException("Another ghat already uses this code.");
-      }
+      const row = await this.prisma.ghat.update({ where: { id }, data, select: ghatSelect });
+      return mapGhat(row);
+    } catch (e) {
+      throwIfUniqueConflict(e, GHAT_CONFLICT_MSG);
       throw e;
     }
   }
 
-  async softDelete(id: string) {
-    const existing = await this.prisma.ghat.findFirst({ where: { id }, select: { id: true } });
-    if (!existing) {
-      throw new NotFoundException("Ghat was not found");
-    }
-    return this.prisma.ghat.update({
-      where: { id },
-      data: { isActive: false },
-      select: { id: true, isActive: true }
-    });
+  softDelete(id: string) {
+    return softDeleteMasterRecord({ delegate: this.prisma.ghat, id, label: GHAT_LABEL });
+  }
+
+  hardDelete(id: string) {
+    return hardDeleteMasterRecord({ delegate: this.prisma.ghat, id, label: GHAT_LABEL });
   }
 }

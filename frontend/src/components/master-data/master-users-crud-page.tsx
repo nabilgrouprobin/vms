@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { MasterDataCsvToolbar } from "@/components/data-table/master-data-csv-toolbar";
@@ -14,9 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   addUserRoleAssignmentsBatch,
   createMasterUser,
@@ -26,6 +26,7 @@ import {
   fetchOrganizationOptions,
   fetchUserRoleAssignments,
   patchMasterUser,
+  purgeMasterUser,
   removeUserRoleAssignment,
   softDeleteMasterUser
 } from "@/lib/master-data-api";
@@ -36,11 +37,13 @@ import {
 } from "@/lib/master-data-csv-bridge";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
-import { APP_ROLES, type MasterUserRow, type Paginated, type UserRoleAssignmentRow } from "@/types/vms";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
+import { APP_ROLES, type MasterUserRow, type UserRoleAssignmentRow } from "@/types/vms";
 
 export function MasterUsersCrudPage() {
   const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const readOnly = !canEdit;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -103,24 +106,20 @@ export function MasterUsersCrudPage() {
     staleTime: 300_000
   });
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-users", debouncedSearch, includeInactive],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterUsers({
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive
-      }),
-    getNextPageParam: (last: Paginated<MasterUserRow>) => last.nextCursor ?? undefined
+  const {
+    listQ,
+    pager,
+    deleteM,
+    invalidateList,
+    runRowAction
+  } = useMasterCrud<MasterUserRow>({
+    queryKey: masterDataKeys.users(),
+    fetchList: fetchMasterUsers,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: (id) => softDeleteMasterUser(id)
   });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
-  );
+  const rows = pager.pageItems;
 
   const organizationSelectOptions = useMemo(() => {
     const fromApi = orgOptionsQ.data ?? [];
@@ -130,19 +129,6 @@ export function MasterUsersCrudPage() {
     }
     return fromApi;
   }, [orgOptionsQ.data, organizationId]);
-
-  const listResetKey = useMemo(
-    () => `${debouncedSearch}\u0000${includeInactive ? "1" : "0"}`,
-    [debouncedSearch, includeInactive]
-  );
-
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
-  });
 
   const openCreate = () => {
     setCreating(true);
@@ -202,26 +188,31 @@ export function MasterUsersCrudPage() {
       return patchMasterUser(editing.id, body);
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-users"] });
+      await invalidateList();
       setSheetOpen(false);
     },
     onError: (e: unknown) => setFormError(parseApiErr(e))
   });
 
-  const deleteM = useMutation({
-    mutationFn: (id: string) => softDeleteMasterUser(id),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-users"] });
-    }
-  });
-
+  /** Custom restore: refresh the open `editing` row after success. */
   const restoreM = useMutation({
     mutationFn: (row: MasterUserRow) => patchMasterUser(row.id, { isActive: true }),
     onSuccess: async (updated) => {
-      await qc.invalidateQueries({ queryKey: ["master-users"] });
+      await invalidateList();
       setEditing((prev) => (prev?.id === updated.id ? updated : prev));
     }
   });
+
+  /** Custom purge: also invalidate the per-user role-assignment cache. */
+  const purgeM = useMutation({
+    mutationFn: (id: string) => purgeMasterUser(id),
+    onSuccess: async (_, purgedId) => {
+      await invalidateList();
+      await qc.invalidateQueries({ queryKey: masterDataKeys.userRoles(purgedId) });
+    }
+  });
+
+  const selfId = profile?.id ?? null;
 
   const addRolesBatchM = useMutation({
     mutationFn: async () => {
@@ -233,12 +224,12 @@ export function MasterUsersCrudPage() {
       });
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-user-roles", editing?.id] });
-      await qc.invalidateQueries({ queryKey: ["master-users"] });
+      await qc.invalidateQueries({ queryKey: masterDataKeys.userRoles(editing?.id) });
+      await invalidateList();
       setPickedRoles([]);
       setBatchLocationId("");
     },
-    onError: (e: unknown) => window.alert(parseApiErr(e))
+    onError: (e: unknown) => toast.error(parseApiErr(e))
   });
 
   const removeRoleM = useMutation({
@@ -247,10 +238,10 @@ export function MasterUsersCrudPage() {
       return removeUserRoleAssignment(editing.id, assignmentId);
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-user-roles", editing?.id] });
-      await qc.invalidateQueries({ queryKey: ["master-users"] });
+      await qc.invalidateQueries({ queryKey: masterDataKeys.userRoles(editing?.id) });
+      await invalidateList();
     },
-    onError: (e: unknown) => window.alert(parseApiErr(e))
+    onError: (e: unknown) => toast.error(parseApiErr(e))
   });
 
   const fmtRoles = (a: UserRoleAssignmentRow) => {
@@ -266,7 +257,7 @@ export function MasterUsersCrudPage() {
         includeInactive
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -280,10 +271,10 @@ export function MasterUsersCrudPage() {
     try {
       const text = await file.text();
       const summary = await importUsersCsv(text);
-      await qc.invalidateQueries({ queryKey: ["master-users"] });
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      await invalidateList();
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -375,31 +366,51 @@ export function MasterUsersCrudPage() {
                               variant="destructive"
                               size="sm"
                               disabled={deleteM.isPending}
-                              onClick={() => {
-                                if (!window.confirm(`Deactivate login for ${identityLabel(row)}?`)) return;
-                                deleteM.mutate(row.id, {
-                                  onError: (e) => window.alert(parseApiErr(e))
-                                });
-                              }}
+                              onClick={() =>
+                                runRowAction(
+                                  deleteM,
+                                  row.id,
+                                  `Deactivate login for ${identityLabel(row)}?`
+                                )
+                              }
                             >
                               Delete
                             </Button>
                           ) : null}
                           {canEdit && row.deletedAt !== null ? (
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              disabled={restoreM.isPending}
-                              onClick={() => {
-                                if (!window.confirm(`Restore ${identityLabel(row)}?`)) return;
-                                restoreM.mutate(row, {
-                                  onError: (e: unknown) => window.alert(parseApiErr(e))
-                                });
-                              }}
-                            >
-                              Restore
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={restoreM.isPending}
+                                onClick={() => {
+                                  if (!window.confirm(`Restore ${identityLabel(row)}?`)) return;
+                                  restoreM.mutate(row, {
+                                    onError: (e: unknown) => toast.error(parseApiErr(e))
+                                  });
+                                }}
+                              >
+                                Restore
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                disabled={purgeM.isPending || selfId === row.id}
+                                title={selfId === row.id ? "You cannot permanently delete your own account." : undefined}
+                                onClick={() => {
+                                  if (selfId === row.id) return;
+                                  runRowAction(
+                                    purgeM,
+                                    row.id,
+                                    `Permanently delete ${identityLabel(row)}? This cannot be undone. It fails while voyages, documents, or audit trails still reference this user.`
+                                  );
+                                }}
+                              >
+                                Delete forever
+                              </Button>
+                            </>
                           ) : null}
                         </div>
                       </td>
@@ -518,19 +529,49 @@ export function MasterUsersCrudPage() {
           ) : null}
 
           {!readOnly && !creating && editing?.deletedAt !== null ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={restoreM.isPending}
-              onClick={() => {
-                if (!editing || !window.confirm(`Restore ${identityLabel(editing)}?`)) return;
-                restoreM.mutate(editing, {
-                  onError: (e: unknown) => window.alert(parseApiErr(e))
-                });
-              }}
-            >
-              Restore account
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={restoreM.isPending}
+                onClick={() => {
+                  if (!editing || !window.confirm(`Restore ${identityLabel(editing)}?`)) return;
+                  restoreM.mutate(editing, {
+                    onError: (e: unknown) => toast.error(parseApiErr(e))
+                  });
+                }}
+              >
+                Restore account
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={purgeM.isPending || !editing || selfId === editing.id}
+                title={
+                  selfId === editing?.id ? "You cannot permanently delete your own account." : undefined
+                }
+                onClick={() => {
+                  if (!editing || selfId === editing.id) return;
+                  if (
+                    !window.confirm(
+                      `Permanently delete ${identityLabel(editing)}? This cannot be undone.`
+                    )
+                  ) {
+                    return;
+                  }
+                  const id = editing.id;
+                  purgeM.mutate(id, {
+                    onSuccess: () => {
+                      setEditing(null);
+                      setSheetOpen(false);
+                    },
+                    onError: (e: unknown) => toast.error(parseApiErr(e))
+                  });
+                }}
+              >
+                Delete forever
+              </Button>
+            </div>
           ) : null}
 
           {!creating && editing?.deletedAt !== null ? (

@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards
 } from "@nestjs/common";
@@ -13,6 +15,7 @@ import { Roles } from "../../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../auth/guards/roles.guard";
 import { SOF_EDITOR_ROLES, SOF_VIEWER_ROLES } from "../sof/constants/sof-roles";
+import { CreateVesselCallDto } from "./dto/create-vessel-call.dto";
 import { ListVesselCallsQueryDto } from "./dto/list-vessel-calls.query.dto";
 import { PatchVesselCallDto } from "./dto/patch-vessel-call.dto";
 import { VesselCallsService } from "./vessel-calls.service";
@@ -28,6 +31,12 @@ export class VesselCallsController {
     return this.vesselCallsService.list(query);
   }
 
+  @Post()
+  @Roles(...SOF_EDITOR_ROLES)
+  create(@Body() dto: CreateVesselCallDto) {
+    return this.vesselCallsService.create(dto);
+  }
+
   @Get(":id")
   async getOne(@Param("id") id: string) {
     const row = await this.vesselCallsService.getById(id);
@@ -41,5 +50,11 @@ export class VesselCallsController {
   @Roles(...SOF_EDITOR_ROLES)
   patch(@Param("id") id: string, @Body() dto: PatchVesselCallDto) {
     return this.vesselCallsService.patch(id, dto);
+  }
+
+  @Delete(":id")
+  @Roles(...SOF_EDITOR_ROLES)
+  remove(@Param("id") id: string) {
+    return this.vesselCallsService.remove(id);
   }
 }

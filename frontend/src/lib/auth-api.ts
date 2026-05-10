@@ -1,20 +1,17 @@
-import { api } from "@/lib/api";
+import { apiValidated } from "@/lib/api";
+import { loginResponseSchema, type LoginResponseSchema } from "@/lib/api-schemas";
 
-export type LoginResponse = {
-  accessToken: string;
-  tokenType: "Bearer";
-  user: {
-    id: string;
-    email: string | null;
-    phone: string;
-    fullName: string;
-    organizationId: string | null;
-    roles: string[];
-  };
-};
+/**
+ * The shape of a successful `/auth/login` or `/auth/signup` response.
+ *
+ * Type is derived from the runtime zod schema (`loginResponseSchema`) so the
+ * compile-time and runtime expectations cannot diverge. Importers should keep
+ * using `LoginResponse` — we just point it at the inferred type now.
+ */
+export type LoginResponse = LoginResponseSchema;
 
 export function loginRequest(login: string, password: string) {
-  return api<LoginResponse>("/auth/login", {
+  return apiValidated("/auth/login", loginResponseSchema, {
     method: "POST",
     body: JSON.stringify({ login, password })
   });
@@ -25,7 +22,7 @@ export function signupRequest(body: {
   phone: string;
   password: string;
 }) {
-  return api<LoginResponse>("/auth/signup", {
+  return apiValidated("/auth/signup", loginResponseSchema, {
     method: "POST",
     body: JSON.stringify(body)
   });

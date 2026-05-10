@@ -49,12 +49,27 @@ export function fetchOpenLighterAssignments(vesselCallId: string) {
   );
 }
 
-export function fetchLighterVesselsForPicker(search?: string, limit = 60, id?: string) {
+export type FetchLighterVesselsForPickerParams = {
+  search?: string;
+  limit?: number;
+  cursor?: string;
+  id?: string;
+  /** When true, lists deactivated lighters from Master data as well */
+  includeInactive?: boolean;
+};
+
+export function fetchLighterVesselsForPicker(
+  params: FetchLighterVesselsForPickerParams = {}
+): Promise<Paginated<LighterVesselPickerRow>> {
   const sp = new URLSearchParams();
-  if (search?.trim()) sp.set("search", search.trim());
-  if (id?.trim()) sp.set("id", id.trim());
-  sp.set("limit", String(limit));
-  return api<LighterVesselPickerRow[]>(`${prefix}/meta/lighter-vessels?${sp.toString()}`);
+  if (params.search?.trim()) sp.set("search", params.search.trim());
+  if (params.id?.trim()) sp.set("id", params.id.trim());
+  if (params.cursor?.trim()) sp.set("cursor", params.cursor.trim());
+  if (params.includeInactive) sp.set("includeInactive", "true");
+  sp.set("limit", String(params.limit ?? 24));
+  return api<Paginated<LighterVesselPickerRow>>(
+    `${prefix}/meta/lighter-vessels?${sp.toString()}`
+  );
 }
 
 export function fetchLighterTripDetail(id: string) {
@@ -65,6 +80,7 @@ export function createLighterTrip(body: {
   lighterAssignmentId?: string;
   vesselCallId?: string;
   lighterVesselId: string;
+  lighterPortCallId?: string;
   remarks?: string | null;
 }) {
   return api<LighterTripDetail>(prefix, {

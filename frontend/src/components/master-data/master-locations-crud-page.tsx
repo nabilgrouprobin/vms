@@ -1,7 +1,7 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
 import { MasterDataCardHeader } from "@/components/master-data/master-data-card-header";
 import { MasterDataSearchFilters } from "@/components/master-data/master-data-search-filters";
@@ -14,13 +14,14 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Skeleton } from "@/components/ui/skeleton";
 import { MasterDataCsvToolbar } from "@/components/data-table/master-data-csv-toolbar";
 import { PaginationBar } from "@/components/data-table/pagination-bar";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   createMasterLocation,
   fetchMasterLocations,
   patchMasterLocation,
+  purgeMasterLocation,
   softDeleteMasterLocation
 } from "@/lib/master-data-api";
 import {
@@ -30,11 +31,12 @@ import {
 } from "@/lib/master-data-csv-bridge";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
-import { LOCATION_TYPES, type MasterLocationRow, type Paginated } from "@/types/vms";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
+import { LOCATION_TYPES, type MasterLocationRow } from "@/types/vms";
 
 export function MasterLocationsCrudPage() {
-  const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const readOnly = !canEdit;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -61,37 +63,25 @@ export function MasterLocationsCrudPage() {
     if (!sheetOpen) setFormError(null);
   }, [sheetOpen]);
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-locations", debouncedSearch, includeInactive],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterLocations({
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive
-      }),
-    getNextPageParam: (last: Paginated<MasterLocationRow>) => last.nextCursor ?? undefined
+  const {
+    listQ,
+    pager,
+    deleteM,
+    restoreM,
+    purgeM,
+    invalidateList,
+    runRowAction
+  } = useMasterCrud<MasterLocationRow>({
+    queryKey: masterDataKeys.locations(),
+    fetchList: fetchMasterLocations,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: softDeleteMasterLocation,
+    restore: (id) => patchMasterLocation(id, { isActive: true }),
+    purge: purgeMasterLocation,
+    extraInvalidateKeys: [["location-options"]]
   });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
-  );
-
-  const listResetKey = useMemo(
-    () => `${debouncedSearch}\u0000${includeInactive ? "1" : "0"}`,
-    [debouncedSearch, includeInactive]
-  );
-
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
-  });
+  const rows = pager.pageItems;
 
   const openCreate = () => {
     setCreating(true);
@@ -147,27 +137,10 @@ export function MasterLocationsCrudPage() {
       });
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-locations"] });
-      await qc.invalidateQueries({ queryKey: ["location-options"] });
+      await invalidateList();
       setSheetOpen(false);
     },
     onError: (e: unknown) => setFormError(parseApiErr(e))
-  });
-
-  const deleteM = useMutation({
-    mutationFn: (id: string) => softDeleteMasterLocation(id),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-locations"] });
-      await qc.invalidateQueries({ queryKey: ["location-options"] });
-    }
-  });
-
-  const restoreM = useMutation({
-    mutationFn: (id: string) => patchMasterLocation(id, { isActive: true }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["master-locations"] });
-      await qc.invalidateQueries({ queryKey: ["location-options"] });
-    }
   });
 
   const onExportCsv = async () => {
@@ -178,7 +151,7 @@ export function MasterLocationsCrudPage() {
         includeInactive
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -192,11 +165,10 @@ export function MasterLocationsCrudPage() {
     try {
       const text = await file.text();
       const summary = await importLocationsCsv(text);
-      await qc.invalidateQueries({ queryKey: ["master-locations"] });
-      await qc.invalidateQueries({ queryKey: ["location-options"] });
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      await invalidateList();
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -286,31 +258,46 @@ export function MasterLocationsCrudPage() {
                             variant="destructive"
                             size="sm"
                             disabled={deleteM.isPending}
-                            onClick={() => {
-                              if (!window.confirm(`Delete (deactivate) location “${row.name}”?`)) return;
-                              deleteM.mutate(row.id, {
-                                onError: (e) => window.alert(parseApiErr(e))
-                              });
-                            }}
+                            onClick={() =>
+                              runRowAction(
+                                deleteM,
+                                row.id,
+                                `Delete (deactivate) location “${row.name}”?`
+                              )
+                            }
                           >
                             Delete
                           </Button>
                         ) : null}
                         {canEdit && !row.isActive ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            disabled={restoreM.isPending}
-                            onClick={() => {
-                              if (!window.confirm(`Restore location “${row.name}”?`)) return;
-                              restoreM.mutate(row.id, {
-                                onError: (e) => window.alert(parseApiErr(e))
-                              });
-                            }}
-                          >
-                            Restore
-                          </Button>
+                          <>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={restoreM.isPending}
+                              onClick={() =>
+                                runRowAction(restoreM, row.id, `Restore location “${row.name}”?`)
+                              }
+                            >
+                              Restore
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              disabled={purgeM.isPending}
+                              onClick={() =>
+                                runRowAction(
+                                  purgeM,
+                                  row.id,
+                                  `Permanently delete location “${row.name}”? This cannot be undone. It fails while ghats, calls, trips, or warehouses still reference this location.`
+                                )
+                              }
+                            >
+                              Delete forever
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </td>

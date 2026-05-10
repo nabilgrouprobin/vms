@@ -42,6 +42,7 @@ function detailRow(remarks: string | null) {
       cargoNameSnapshot: null,
       vessel: { id: "mv", name: "M", imoNo: null }
     },
+    lighterPortCall: null,
     statementOfFacts: null,
     lighterAssignment: null,
     events: [],
@@ -261,6 +262,8 @@ describe("LighterTripsService.list", () => {
       tripNo: `T-${i}`,
       status: LighterTripStatus.PLANNED,
       assignedAt: new Date(),
+      lighterPortCallId: null as string | null,
+      lighterPortCall: null as { id: string; callNo: string; status: string } | null,
       lighterVessel: { id: "lv", name: "L", imoNo: null },
       vesselCall: {
         id: "vc",
@@ -268,7 +271,7 @@ describe("LighterTripsService.list", () => {
         status: "AT_ANCHORAGE" as const,
         vessel: { id: "v", name: "M" }
       },
-      statementOfFacts: []
+      statementOfFacts: null
     }));
 
     const { service } = svc({

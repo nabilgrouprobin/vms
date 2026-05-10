@@ -6,15 +6,17 @@ import {
 import { Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
+import { parseLimit } from "../../lib/parse-limit";
 import { CreateMasterVesselDto } from "./dto/create-master-vessel.dto";
 import { ListMasterVesselsQueryDto } from "./dto/list-master-vessels.query.dto";
 import { UpdateMasterVesselDto } from "./dto/update-master-vessel.dto";
 import { decString, toDecimalOrNull } from "./utils/decimal-json";
+import { rethrowPrismaDeleteError } from "./utils/rethrow-prisma-delete-error";
+
+const DEFAULT_LIST_LIMIT = 30;
 
 export type MasterVesselKind = "mother" | "lighter";
 
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
 
 const vesselSelect = {
   id: true,
@@ -27,14 +29,31 @@ const vesselSelect = {
   maxDraftMeters: true,
   lengthOverallM: true,
   beamM: true,
+  hullDisplayCode: true,
   isActive: true,
   isMotherVessel: true,
   isLighter: true,
   createdAt: true,
   updatedAt: true
-} as const;
+} satisfies Prisma.VesselSelect;
 
-type VesselListRow = Prisma.VesselGetPayload<{ select: typeof vesselSelect }> & {
+type VesselListRow = {
+  id: string;
+  name: string;
+  imoNo: string | null;
+  flag: string | null;
+  vesselType: string | null;
+  yearBuilt: number | null;
+  deadweightTon: Prisma.Decimal | null;
+  maxDraftMeters: Prisma.Decimal | null;
+  lengthOverallM: Prisma.Decimal | null;
+  beamM: Prisma.Decimal | null;
+  hullDisplayCode: number;
+  isActive: boolean;
+  isMotherVessel: boolean;
+  isLighter: boolean;
+  createdAt: Date;
+  updatedAt: Date;
   _count: { motherCalls: number } | { lighterTrips: number };
 };
 
@@ -42,16 +61,17 @@ type VesselListRow = Prisma.VesselGetPayload<{ select: typeof vesselSelect }> & 
 export class MasterVesselsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
-
   private kindWhere(kind: MasterVesselKind): Prisma.VesselWhereInput {
     return kind === "mother" ? { isMotherVessel: true } : { isLighter: true };
+  }
+
+  /** One global serial for mother + lighter hulls so port `callNo` stays unique. */
+  private async nextHullDisplayCode(): Promise<number> {
+    const agg = await this.prisma.vessel.aggregate({
+      where: { OR: [{ isMotherVessel: true }, { isLighter: true }] },
+      _max: { hullDisplayCode: true }
+    });
+    return (agg._max.hullDisplayCode ?? 0) + 1;
   }
 
   private mapVessel(kind: MasterVesselKind, row: VesselListRow) {
@@ -69,6 +89,7 @@ export class MasterVesselsService {
       isActive: row.isActive,
       isMotherVessel: row.isMotherVessel,
       isLighter: row.isLighter,
+      hullDisplayCode: row.hullDisplayCode,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       _count: row._count
@@ -76,7 +97,7 @@ export class MasterVesselsService {
   }
 
   async list(kind: MasterVesselKind, query: ListMasterVesselsQueryDto) {
-    const limit = this.parseLimit(query.limit);
+    const limit = parseLimit(query.limit, DEFAULT_LIST_LIMIT);
     const includeInactive = query.includeInactive === "true";
     const search = query.search?.trim();
 
@@ -108,7 +129,7 @@ export class MasterVesselsService {
     });
 
     const nextCursor = rows.length > limit ? rows[limit].id : null;
-    const slice = rows.slice(0, limit) as VesselListRow[];
+    const slice = rows.slice(0, limit) as unknown as VesselListRow[];
     return {
       data: slice.map((r) => this.mapVessel(kind, r)),
       nextCursor,
@@ -127,43 +148,62 @@ export class MasterVesselsService {
             : { select: { lighterTrips: true } }
       }
     });
-    return row ? this.mapVessel(kind, row as VesselListRow) : null;
+    return row ? this.mapVessel(kind, row as unknown as VesselListRow) : null;
   }
 
   async create(kind: MasterVesselKind, dto: CreateMasterVesselDto) {
     const name = dto.name.trim();
-    try {
-      const row = await this.prisma.vessel.create({
-        data: {
-          name,
-          imoNo: dto.imoNo?.trim() || null,
-          flag: dto.flag?.trim() || null,
-          vesselType: dto.vesselType?.trim() || null,
-          yearBuilt: dto.yearBuilt ?? null,
-          deadweightTon: toDecimalOrNull(dto.deadweightTon),
-          maxDraftMeters: toDecimalOrNull(dto.maxDraftMeters),
-          lengthOverallM: toDecimalOrNull(dto.lengthOverallM),
-          beamM: toDecimalOrNull(dto.beamM),
-          isMotherVessel: kind === "mother",
-          isLighter: kind === "lighter"
-        },
-        select: {
-          ...vesselSelect,
-          _count:
-            kind === "mother"
-              ? { select: { motherCalls: true } }
-              : { select: { lighterTrips: true } }
+    // Retry on hull-code collision: MAX(...)+1 is racy, so two concurrent
+    // creates can pick the same code. The unique constraint surfaces P2002
+    // with target "hull_display_code" — recompute and try again, capped.
+    const HULL_RETRIES = 5;
+    for (let attempt = 0; attempt < HULL_RETRIES; attempt += 1) {
+      const nextHullCode = await this.nextHullDisplayCode();
+      try {
+        const row = await this.prisma.vessel.create({
+          data: {
+            name,
+            imoNo: dto.imoNo?.trim() || null,
+            flag: dto.flag?.trim() || null,
+            vesselType: dto.vesselType?.trim() || null,
+            yearBuilt: dto.yearBuilt ?? null,
+            deadweightTon: toDecimalOrNull(dto.deadweightTon),
+            maxDraftMeters: toDecimalOrNull(dto.maxDraftMeters),
+            lengthOverallM: toDecimalOrNull(dto.lengthOverallM),
+            beamM: toDecimalOrNull(dto.beamM),
+            isMotherVessel: kind === "mother",
+            isLighter: kind === "lighter",
+            hullDisplayCode: nextHullCode
+          },
+          select: {
+            ...vesselSelect,
+            _count:
+              kind === "mother"
+                ? { select: { motherCalls: true } }
+                : { select: { lighterTrips: true } }
+          }
+        });
+        return this.mapVessel(kind, row as unknown as VesselListRow);
+      } catch (e: any) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          const target = (e.meta as { target?: string[] | string } | undefined)?.target;
+          const targetList = Array.isArray(target) ? target : target ? [target] : [];
+          const onlyHullClash = targetList.some((t) =>
+            t.includes("hull_display_code")
+          );
+          if (onlyHullClash && attempt < HULL_RETRIES - 1) {
+            continue;
+          }
+          throw new BadRequestException(
+            "Another vessel already uses this name or IMO number."
+          );
         }
-      });
-      return this.mapVessel(kind, row as VesselListRow);
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException(
-          "Another vessel already uses this name or IMO number."
-        );
+        throw e;
       }
-      throw e;
     }
+    throw new BadRequestException(
+      "Could not allocate a unique hull display code after several attempts. Please retry."
+    );
   }
 
   async update(kind: MasterVesselKind, id: string, dto: UpdateMasterVesselDto) {
@@ -224,7 +264,7 @@ export class MasterVesselsService {
               : { select: { lighterTrips: true } }
         }
       });
-      return this.mapVessel(kind, row as VesselListRow);
+      return this.mapVessel(kind, row as unknown as VesselListRow);
     } catch (e: any) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new BadRequestException(
@@ -249,5 +289,33 @@ export class MasterVesselsService {
       data: { isActive: false },
       select: { id: true, isActive: true }
     });
+  }
+
+  /** Permanent remove — only allowed when inactive and unused (no calls, trips, stock movements). */
+  async hardDelete(kind: MasterVesselKind, id: string) {
+    const row = await this.prisma.vessel.findFirst({
+      where: { id, ...this.kindWhere(kind), isActive: false },
+      select: {
+        id: true,
+        _count: { select: { motherCalls: true, lighterTrips: true, stockMovements: true } }
+      }
+    });
+    if (!row) {
+      throw new NotFoundException(
+        "Vessel was not found or is still active. Deactivate it before removing permanently."
+      );
+    }
+    const { motherCalls, lighterTrips, stockMovements } = row._count;
+    if (motherCalls > 0 || lighterTrips > 0 || stockMovements > 0) {
+      throw new BadRequestException(
+        `Cannot permanently delete while linked to ${motherCalls} mother call(s), ${lighterTrips} lighter trip(s), and ${stockMovements} stock movement(s).`
+      );
+    }
+    try {
+      await this.prisma.vessel.delete({ where: { id } });
+    } catch (e) {
+      rethrowPrismaDeleteError(e);
+    }
+    return { ok: true as const };
   }
 }

@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import path from "path";
 import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 const normalizedBackendOrigin = (
   process.env.BACKEND_INTERNAL_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
@@ -10,8 +10,10 @@ const normalizedBackendOrigin = (
 ).replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
+  /** Avoid conflicts when `.next` was created by root (PM2/deploy); keep prod output separate. */
+  distDir: ".next-prod",
   /** Monorepo: trace dependencies from repo root (pairs with root `package.json` + Prettier). */
-  outputFileTracingRoot: path.join(__dirname, ".."),
+  outputFileTracingRoot: path.join(frontendRoot, ".."),
   experimental: {
     optimizePackageImports: [
       "lucide-react",

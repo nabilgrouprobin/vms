@@ -18,7 +18,7 @@ module.exports = {
     {
       name: "vms-backend",
       cwd: path.join(root, "backend"),
-      script: path.join(root, "backend", "build", "src", "main.js"),
+      script: path.join(root, "backend", "dist", "main.js"),
       instances: 1,
       exec_mode: "fork",
       autorestart: true,

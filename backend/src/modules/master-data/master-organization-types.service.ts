@@ -1,14 +1,17 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
+import { MAX_OPTION_LIST_ROWS } from "../../lib/limits";
 import { PrismaService } from "../../prisma/prisma.service";
+import { parseLimit } from "../../lib/parse-limit";
 import { allocateUniqueCode } from "./master-code.util";
 import { CreateMasterOrganizationTypeDto } from "./dto/create-master-organization-type.dto";
 import { ListMasterReferenceQueryDto } from "./dto/list-master-reference.query.dto";
 import { UpdateMasterOrganizationTypeDto } from "./dto/update-master-organization-type.dto";
+import { rethrowPrismaDeleteError } from "./utils/rethrow-prisma-delete-error";
 
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
+const DEFAULT_LIST_LIMIT = 30;
+
 
 const rowSelect = {
   id: true,
@@ -25,26 +28,19 @@ const rowSelect = {
 export class MasterOrganizationTypesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
 
   /** Labels for organization forms and imports. */
   async listOptions() {
     return this.prisma.organizationTypeDefinition.findMany({
       where: { deletedAt: null, isActive: true },
       orderBy: [{ name: "asc" }, { code: "asc" }],
-      take: 500,
+      take: MAX_OPTION_LIST_ROWS,
       select: { id: true, code: true, name: true }
     });
   }
 
   async list(query: ListMasterReferenceQueryDto) {
-    const limit = this.parseLimit(query.limit);
+    const limit = parseLimit(query.limit, DEFAULT_LIST_LIMIT);
     const includeInactive = query.includeInactive === "true";
     const search = query.search?.trim();
 
@@ -159,5 +155,28 @@ export class MasterOrganizationTypesService {
       },
       select: rowSelect
     });
+  }
+
+  async hardDelete(id: string) {
+    const existing = await this.prisma.organizationTypeDefinition.findFirst({
+      where: { id, isActive: false },
+      select: { id: true, _count: { select: { organizations: true } } }
+    });
+    if (!existing) {
+      throw new NotFoundException(
+        "Organization type was not found or is still active. Deactivate it before removing permanently."
+      );
+    }
+    if (existing._count.organizations > 0) {
+      throw new ConflictException(
+        "This organization type is still assigned to organizations; reassign them first."
+      );
+    }
+    try {
+      await this.prisma.organizationTypeDefinition.delete({ where: { id } });
+    } catch (e) {
+      rethrowPrismaDeleteError(e);
+    }
+    return { ok: true as const };
   }
 }

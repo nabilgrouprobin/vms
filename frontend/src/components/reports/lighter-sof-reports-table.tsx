@@ -246,7 +246,9 @@ export function LighterSofReportsTable({
                   <Link
                     href={vesselSofWorkspacePath("overview", "lighter", {
                       id: r.id,
-                      lighterVesselId: r.lighterTrip?.lighterVessel.id ?? null
+                      ...(r.lighterTrip?.lighterPortCallId
+                        ? { lighterCallId: r.lighterTrip.lighterPortCallId }
+                        : { lighterVesselId: r.lighterTrip?.lighterVessel.id ?? null })
                     })}
                   >
                     Open

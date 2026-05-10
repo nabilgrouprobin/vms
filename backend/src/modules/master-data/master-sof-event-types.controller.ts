@@ -60,6 +60,12 @@ export class MasterSofEventTypesController {
     return this.types.update(id, dto);
   }
 
+  @Post(":id/purge")
+  @Roles(...MASTER_DATA_EDITOR_ROLES)
+  purge(@Param("id") id: string) {
+    return this.types.hardDelete(id);
+  }
+
   @Delete(":id")
   @Roles(...MASTER_DATA_EDITOR_ROLES)
   remove(@Param("id") id: string) {

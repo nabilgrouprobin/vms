@@ -69,12 +69,12 @@ fi
 
 echo "[pm2-restart-vms] building backend..."
 cd "$ROOT/backend"
-sudo chown -R "$(whoami):$(whoami)" build node_modules 2>/dev/null || true
+sudo chown -R "$(whoami):$(whoami)" dist node_modules 2>/dev/null || true
 npm run build
 
 echo "[pm2-restart-vms] building frontend..."
 cd "$ROOT/frontend"
-sudo chown -R "$(whoami):$(whoami)" .next node_modules 2>/dev/null || true
+sudo chown -R "$(whoami):$(whoami)" .next .next-prod node_modules 2>/dev/null || true
 npm run build
 
 cd "$ROOT"

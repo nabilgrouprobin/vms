@@ -217,7 +217,9 @@ export function SofDirectoryList({ variant }: { variant: Variant }) {
                   <Link
                     href={vesselSofWorkspacePath("overview", "lighter", {
                       id: r.id,
-                      lighterVesselId: r.lighterTrip?.lighterVessel.id ?? null
+                      ...(r.lighterTrip?.lighterPortCallId
+                        ? { lighterCallId: r.lighterTrip.lighterPortCallId }
+                        : { lighterVesselId: r.lighterTrip?.lighterVessel.id ?? null })
                     })}
                     prefetch
                     className="block h-full min-h-0 flex-1"

@@ -1,18 +1,19 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException
-} from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
+import { MAX_OPTION_LIST_ROWS } from "../../lib/limits";
 import { PrismaService } from "../../prisma/prisma.service";
 import { allocateUniqueCode } from "./master-code.util";
 import { CreateMasterLocationDto } from "./dto/create-master-location.dto";
 import { ListMasterReferenceQueryDto } from "./dto/list-master-reference.query.dto";
 import { UpdateMasterLocationDto } from "./dto/update-master-location.dto";
-
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 100;
+import {
+  getMasterById,
+  hardDeleteMasterRecord,
+  listMasterPaginated,
+  softDeleteMasterRecord,
+  throwIfUniqueConflict
+} from "./utils/master-crud.helpers";
 
 const locationSelect = {
   id: true,
@@ -30,62 +31,40 @@ const locationSelect = {
   updatedAt: true
 } as const;
 
+type LocationRow = Prisma.LocationGetPayload<{ select: typeof locationSelect }>;
+
+const LOCATION_LABEL = "Location";
+const LOCATION_CONFLICT_MSG = "Another location already uses this code for the same type.";
+
 @Injectable()
 export class MasterLocationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseLimit(raw?: string): number {
-    const n = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(n) || n < 1) {
-      return DEFAULT_LIMIT;
-    }
-    return Math.min(n, MAX_LIMIT);
-  }
-
   /** For dropdowns (e.g. ghats). */
-  async listOptions() {
+  listOptions() {
     return this.prisma.location.findMany({
       where: { deletedAt: null, isActive: true },
       orderBy: [{ name: "asc" }],
-      take: 500,
+      take: MAX_OPTION_LIST_ROWS,
       select: { id: true, code: true, name: true, type: true }
     });
   }
 
-  async list(query: ListMasterReferenceQueryDto) {
-    const limit = this.parseLimit(query.limit);
-    const includeInactive = query.includeInactive === "true";
-    const search = query.search?.trim();
-
-    const where: Prisma.LocationWhereInput = {
-      deletedAt: null,
-      ...(includeInactive ? {} : { isActive: true }),
-      ...(search
-        ? {
-            OR: [
-              { code: { contains: search, mode: "insensitive" } },
-              { name: { contains: search, mode: "insensitive" } }
-            ]
-          }
-        : {})
-    };
-
-    const rows = await this.prisma.location.findMany({
-      where,
-      orderBy: [{ code: "asc" }, { id: "asc" }],
-      take: limit + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      select: locationSelect
+  list(query: ListMasterReferenceQueryDto) {
+    return listMasterPaginated<LocationRow, typeof locationSelect, Prisma.LocationWhereInput>({
+      delegate: this.prisma.location,
+      query,
+      select: locationSelect,
+      softDeletable: true
     });
-
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
-    return { data: rows.slice(0, limit), nextCursor, limit };
   }
 
-  async getById(id: string) {
-    return this.prisma.location.findFirst({
-      where: { id, deletedAt: null },
-      select: locationSelect
+  getById(id: string) {
+    return getMasterById<LocationRow, typeof locationSelect>({
+      delegate: this.prisma.location,
+      id,
+      select: locationSelect,
+      softDeletable: true
     });
   }
 
@@ -110,12 +89,8 @@ export class MasterLocationsService {
         },
         select: locationSelect
       });
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException(
-          "Another location already uses this code for the same type."
-        );
-      }
+    } catch (e) {
+      throwIfUniqueConflict(e, LOCATION_CONFLICT_MSG);
       throw e;
     }
   }
@@ -130,23 +105,16 @@ export class MasterLocationsService {
     }
 
     const data: Prisma.LocationUpdateInput = {};
-    if (dto.name !== undefined) {
-      data.name = dto.name.trim();
-    }
-    if (dto.type !== undefined) {
-      data.type = dto.type;
-    }
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.type !== undefined) data.type = dto.type;
     if (dto.address !== undefined) {
-      data.address =
-        dto.address === null || dto.address === "" ? null : dto.address.trim();
+      data.address = dto.address === null || dto.address === "" ? null : dto.address.trim();
     }
     if (dto.district !== undefined) {
-      data.district =
-        dto.district === null || dto.district === "" ? null : dto.district.trim();
+      data.district = dto.district === null || dto.district === "" ? null : dto.district.trim();
     }
     if (dto.division !== undefined) {
-      data.division =
-        dto.division === null || dto.division === "" ? null : dto.division.trim();
+      data.division = dto.division === null || dto.division === "" ? null : dto.division.trim();
     }
     if (dto.country !== undefined) {
       data.country =
@@ -168,33 +136,28 @@ export class MasterLocationsService {
     }
 
     try {
-      return await this.prisma.location.update({
-        where: { id },
-        data,
-        select: locationSelect
-      });
-    } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        throw new BadRequestException(
-          "Another location already uses this code for the same type."
-        );
-      }
+      return await this.prisma.location.update({ where: { id }, data, select: locationSelect });
+    } catch (e) {
+      throwIfUniqueConflict(e, LOCATION_CONFLICT_MSG);
       throw e;
     }
   }
 
-  async softDelete(id: string) {
-    const existing = await this.prisma.location.findFirst({
-      where: { id, deletedAt: null },
-      select: { id: true }
+  softDelete(id: string) {
+    return softDeleteMasterRecord({
+      delegate: this.prisma.location,
+      id,
+      label: LOCATION_LABEL,
+      softDeletable: true
     });
-    if (!existing) {
-      throw new NotFoundException("Location was not found");
-    }
-    return this.prisma.location.update({
-      where: { id },
-      data: { isActive: false },
-      select: { id: true, isActive: true }
+  }
+
+  hardDelete(id: string) {
+    return hardDeleteMasterRecord({
+      delegate: this.prisma.location,
+      id,
+      label: LOCATION_LABEL,
+      softDeletable: true
     });
   }
 }

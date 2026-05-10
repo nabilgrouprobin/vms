@@ -16,30 +16,58 @@ import type {
   UserRoleAssignmentRow
 } from "@/types/vms";
 
-function listPath(kind: MasterVesselKind): string {
-  return kind === "mother" ? "/master-data/mother-vessels" : "/master-data/lighter-vessels";
-}
+// ---------------------------------------------------------------------------
+// masterCrud factory
+// ---------------------------------------------------------------------------
 
-export function fetchMasterVessels(
-  kind: MasterVesselKind,
-  params: {
-    limit?: number;
-    cursor?: string;
-    search?: string;
-    includeInactive?: boolean;
-  }
-) {
+type ListParams = {
+  limit?: number;
+  cursor?: string;
+  search?: string;
+  includeInactive?: boolean;
+};
+
+function refParams(params: ListParams): string {
   const sp = new URLSearchParams();
   if (params.limit) sp.set("limit", String(params.limit));
   if (params.cursor) sp.set("cursor", params.cursor);
   if (params.search?.trim()) sp.set("search", params.search.trim());
   if (params.includeInactive) sp.set("includeInactive", "true");
-  const q = sp.toString();
-  return api<Paginated<MasterVesselRow>>(`${listPath(kind)}${q ? `?${q}` : ""}`);
+  return sp.toString();
 }
 
-export function fetchMasterVessel(kind: MasterVesselKind, id: string) {
-  return api<MasterVesselRow>(`${listPath(kind)}/${encodeURIComponent(id)}`);
+/**
+ * Build a typed CRUD client around a `/master-data/...` resource path.
+ *
+ * Each master-data endpoint exposes the same six operations (list, fetchOne,
+ * create, patch, softDelete, purge) — the factory captures the shape once and
+ * each per-resource named export below collapses to a one-liner.
+ */
+function masterCrud<Row, CreateBody, PatchBody>(basePath: string) {
+  const idPath = (id: string) => `${basePath}/${encodeURIComponent(id)}`;
+  return {
+    list: (params: ListParams) => {
+      const q = refParams(params);
+      return api<Paginated<Row>>(`${basePath}${q ? `?${q}` : ""}`);
+    },
+    fetchOne: (id: string) => api<Row>(idPath(id)),
+    create: (body: CreateBody) =>
+      api<Row>(basePath, { method: "POST", body: JSON.stringify(body) }),
+    patch: (id: string, body: PatchBody) =>
+      api<Row>(idPath(id), { method: "PATCH", body: JSON.stringify(body) }),
+    softDelete: (id: string) =>
+      api<{ id: string; isActive: boolean }>(idPath(id), { method: "DELETE" }),
+    purge: (id: string) =>
+      api<{ ok: true }>(`${idPath(id)}/purge`, { method: "POST" })
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Per-resource clients (typed wrappers around the shared factory)
+// ---------------------------------------------------------------------------
+
+function vesselsBasePath(kind: MasterVesselKind): string {
+  return kind === "mother" ? "/master-data/mother-vessels" : "/master-data/lighter-vessels";
 }
 
 export type MasterVesselWriteBody = {
@@ -54,114 +82,60 @@ export type MasterVesselWriteBody = {
   beamM?: number | null;
 };
 
-export function createMasterVessel(kind: MasterVesselKind, body: MasterVesselWriteBody) {
-  return api<MasterVesselRow>(listPath(kind), {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+const vesselsApi = (kind: MasterVesselKind) =>
+  masterCrud<
+    MasterVesselRow,
+    MasterVesselWriteBody,
+    Partial<MasterVesselWriteBody> & { isActive?: boolean }
+  >(vesselsBasePath(kind));
 
-export function patchMasterVessel(
+export const fetchMasterVessels = (kind: MasterVesselKind, params: ListParams) =>
+  vesselsApi(kind).list(params);
+export const fetchMasterVessel = (kind: MasterVesselKind, id: string) =>
+  vesselsApi(kind).fetchOne(id);
+export const createMasterVessel = (kind: MasterVesselKind, body: MasterVesselWriteBody) =>
+  vesselsApi(kind).create(body);
+export const patchMasterVessel = (
   kind: MasterVesselKind,
   id: string,
   body: Partial<MasterVesselWriteBody> & { isActive?: boolean }
-) {
-  return api<MasterVesselRow>(`${listPath(kind)}/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
+) => vesselsApi(kind).patch(id, body);
+export const softDeleteMasterVessel = (kind: MasterVesselKind, id: string) =>
+  vesselsApi(kind).softDelete(id);
+export const purgeMasterVessel = (kind: MasterVesselKind, id: string) =>
+  vesselsApi(kind).purge(id);
 
-export function softDeleteMasterVessel(kind: MasterVesselKind, id: string) {
-  return api<{ id: string; isActive: boolean }>(
-    `${listPath(kind)}/${encodeURIComponent(id)}`,
-    { method: "DELETE" }
-  );
-}
+// ---- Products -------------------------------------------------------------
 
-const refParams = (params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) => {
-  const sp = new URLSearchParams();
-  if (params.limit) sp.set("limit", String(params.limit));
-  if (params.cursor) sp.set("cursor", params.cursor);
-  if (params.search?.trim()) sp.set("search", params.search.trim());
-  if (params.includeInactive) sp.set("includeInactive", "true");
-  return sp.toString();
-};
-
-export function fetchMasterProducts(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) {
-  const q = refParams(params);
-  return api<Paginated<MasterProductRow>>(`/master-data/products${q ? `?${q}` : ""}`);
-}
-
-export function fetchMasterProduct(id: string) {
-  return api<MasterProductRow>(`/master-data/products/${encodeURIComponent(id)}`);
-}
-
-export function createMasterProduct(body: {
+export type MasterProductCreateBody = {
   name: string;
   type: string;
   specification?: string | null;
   hsCode?: string | null;
   defaultUom?: string;
-}) {
-  return api<MasterProductRow>("/master-data/products", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+};
+export type MasterProductPatchBody = {
+  name?: string;
+  type?: string;
+  specification?: string | null;
+  hsCode?: string | null;
+  defaultUom?: string | null;
+  isActive?: boolean;
+};
 
-export function patchMasterProduct(
-  id: string,
-  body: {
-    name?: string;
-    type?: string;
-    specification?: string | null;
-    hsCode?: string | null;
-    defaultUom?: string | null;
-    isActive?: boolean;
-  }
-) {
-  return api<MasterProductRow>(`/master-data/products/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
+const productsApi = masterCrud<MasterProductRow, MasterProductCreateBody, MasterProductPatchBody>(
+  "/master-data/products"
+);
+export const fetchMasterProducts = productsApi.list;
+export const fetchMasterProduct = productsApi.fetchOne;
+export const createMasterProduct = productsApi.create;
+export const patchMasterProduct = productsApi.patch;
+export const softDeleteMasterProduct = productsApi.softDelete;
+export const purgeMasterProduct = productsApi.purge;
 
-export function softDeleteMasterProduct(id: string) {
-  return api<{ id: string; isActive: boolean }>(`/master-data/products/${encodeURIComponent(id)}`, {
-    method: "DELETE"
-  });
-}
+// ---- Locations ------------------------------------------------------------
 
-export function fetchMasterLocations(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) {
-  const q = refParams(params);
-  return api<Paginated<MasterLocationRow>>(`/master-data/locations${q ? `?${q}` : ""}`);
-}
-
-export function fetchLocationOptions() {
-  return api<MasterLocationOption[]>("/master-data/locations/options");
-}
-
-export function fetchMasterLocation(id: string) {
-  return api<MasterLocationRow>(`/master-data/locations/${encodeURIComponent(id)}`);
-}
-
-export function createMasterLocation(body: {
+export type MasterLocationCreateBody = {
   name: string;
   type: string;
   address?: string | null;
@@ -169,149 +143,103 @@ export function createMasterLocation(body: {
   division?: string | null;
   country?: string;
   postalCode?: string | null;
-}) {
-  return api<MasterLocationRow>("/master-data/locations", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
+};
+export type MasterLocationPatchBody = {
+  name?: string;
+  type?: string;
+  address?: string | null;
+  district?: string | null;
+  division?: string | null;
+  country?: string | null;
+  postalCode?: string | null;
+  isActive?: boolean;
+};
+
+const locationsApi = masterCrud<
+  MasterLocationRow,
+  MasterLocationCreateBody,
+  MasterLocationPatchBody
+>("/master-data/locations");
+export const fetchMasterLocations = locationsApi.list;
+export const fetchMasterLocation = locationsApi.fetchOne;
+export const createMasterLocation = locationsApi.create;
+export const patchMasterLocation = locationsApi.patch;
+export const softDeleteMasterLocation = locationsApi.softDelete;
+export const purgeMasterLocation = locationsApi.purge;
+
+export function fetchLocationOptions() {
+  return api<MasterLocationOption[]>("/master-data/locations/options");
 }
 
-export function patchMasterLocation(
-  id: string,
-  body: {
-    name?: string;
-    type?: string;
-    address?: string | null;
-    district?: string | null;
-    division?: string | null;
-    country?: string | null;
-    postalCode?: string | null;
-    isActive?: boolean;
-  }
-) {
-  return api<MasterLocationRow>(`/master-data/locations/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
+// ---- Organizations --------------------------------------------------------
 
-export function softDeleteMasterLocation(id: string) {
-  return api<{ id: string; isActive: boolean }>(
-    `/master-data/locations/${encodeURIComponent(id)}`,
-    { method: "DELETE" }
-  );
-}
-
-export function fetchOrganizationOptions() {
-  return api<MasterOrganizationOption[]>("/master-data/organizations/options");
-}
-
-export function fetchMasterOrganizations(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) {
-  const q = refParams(params);
-  return api<Paginated<MasterOrganizationRow>>(`/master-data/organizations${q ? `?${q}` : ""}`);
-}
-
-export function fetchMasterOrganization(id: string) {
-  return api<MasterOrganizationRow>(`/master-data/organizations/${encodeURIComponent(id)}`);
-}
-
-export function createMasterOrganization(body: {
+export type MasterOrganizationCreateBody = {
   name: string;
   organizationTypeId: string;
   address?: string | null;
   contactPerson?: string | null;
   contactNo?: string | null;
   email?: string | null;
-}) {
-  return api<MasterOrganizationRow>("/master-data/organizations", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+};
+export type MasterOrganizationPatchBody = {
+  name?: string;
+  organizationTypeId?: string;
+  address?: string | null;
+  contactPerson?: string | null;
+  contactNo?: string | null;
+  email?: string | null;
+  isActive?: boolean;
+};
 
-export function patchMasterOrganization(
-  id: string,
-  body: {
-    name?: string;
-    organizationTypeId?: string;
-    address?: string | null;
-    contactPerson?: string | null;
-    contactNo?: string | null;
-    email?: string | null;
-    isActive?: boolean;
-  }
-) {
-  return api<MasterOrganizationRow>(`/master-data/organizations/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
-
+const organizationsApi = masterCrud<
+  MasterOrganizationRow,
+  MasterOrganizationCreateBody,
+  MasterOrganizationPatchBody
+>("/master-data/organizations");
+export const fetchMasterOrganizations = organizationsApi.list;
+export const fetchMasterOrganization = organizationsApi.fetchOne;
+export const createMasterOrganization = organizationsApi.create;
+export const patchMasterOrganization = organizationsApi.patch;
+// softDelete returns the row (not isActive only) for organizations — preserve legacy shape.
 export function softDeleteMasterOrganization(id: string) {
-  return api<MasterOrganizationRow>(`/master-data/organizations/${encodeURIComponent(id)}`, {
-    method: "DELETE"
-  });
+  return api<MasterOrganizationRow>(
+    `/master-data/organizations/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
 }
+export const purgeMasterOrganization = organizationsApi.purge;
+
+export function fetchOrganizationOptions() {
+  return api<MasterOrganizationOption[]>("/master-data/organizations/options");
+}
+
+// ---- Organization types ---------------------------------------------------
+
+const organizationTypesApi = masterCrud<
+  MasterOrganizationTypeRow,
+  { name: string },
+  { name?: string; isActive?: boolean }
+>("/master-data/organization-types");
+export const fetchMasterOrganizationTypes = organizationTypesApi.list;
+export const createMasterOrganizationType = organizationTypesApi.create;
+export const patchMasterOrganizationType = organizationTypesApi.patch;
+export function softDeleteMasterOrganizationType(id: string) {
+  return api<MasterOrganizationTypeRow>(
+    `/master-data/organization-types/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+}
+export const purgeMasterOrganizationType = organizationTypesApi.purge;
 
 export function fetchOrganizationTypeOptions() {
-  return api<{ id: string; code: string; name: string }[]>("/master-data/organization-types/options");
-}
-
-export function fetchMasterOrganizationTypes(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) {
-  const q = refParams(params);
-  return api<Paginated<MasterOrganizationTypeRow>>(
-    `/master-data/organization-types${q ? `?${q}` : ""}`
+  return api<{ id: string; code: string; name: string }[]>(
+    "/master-data/organization-types/options"
   );
 }
 
-export function createMasterOrganizationType(body: { name: string }) {
-  return api<MasterOrganizationTypeRow>("/master-data/organization-types", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+// ---- Ghats ----------------------------------------------------------------
 
-export function patchMasterOrganizationType(
-  id: string,
-  body: { name?: string; isActive?: boolean }
-) {
-  return api<MasterOrganizationTypeRow>(`/master-data/organization-types/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
-
-export function softDeleteMasterOrganizationType(id: string) {
-  return api<MasterOrganizationTypeRow>(`/master-data/organization-types/${encodeURIComponent(id)}`, {
-    method: "DELETE"
-  });
-}
-
-export function fetchMasterGhats(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) {
-  const q = refParams(params);
-  return api<Paginated<MasterGhatRow>>(`/master-data/ghats${q ? `?${q}` : ""}`);
-}
-
-export function fetchMasterGhat(id: string) {
-  return api<MasterGhatRow>(`/master-data/ghats/${encodeURIComponent(id)}`);
-}
-
-export function createMasterGhat(body: {
+export type MasterGhatCreateBody = {
   name: string;
   locationId: string;
   numberOfJetties?: number;
@@ -323,52 +251,56 @@ export function createMasterGhat(body: {
   contactNo?: string | null;
   unloadingCapacityMtPerDay?: number | null;
   warehouseCapacityMt?: number | null;
-}) {
-  return api<MasterGhatRow>("/master-data/ghats", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+};
+export type MasterGhatPatchBody = {
+  name?: string;
+  locationId?: string;
+  numberOfJetties?: number;
+  hasWarehouseStorage?: boolean;
+  hasTruckScale?: boolean;
+  workingStartHour?: string | null;
+  workingEndHour?: string | null;
+  contactPerson?: string | null;
+  contactNo?: string | null;
+  isActive?: boolean;
+  unloadingCapacityMtPerDay?: number | null;
+  warehouseCapacityMt?: number | null;
+};
 
-export function patchMasterGhat(
-  id: string,
-  body: {
-    name?: string;
-    locationId?: string;
-    numberOfJetties?: number;
-    hasWarehouseStorage?: boolean;
-    hasTruckScale?: boolean;
-    workingStartHour?: string | null;
-    workingEndHour?: string | null;
-    contactPerson?: string | null;
-    contactNo?: string | null;
-    isActive?: boolean;
-    unloadingCapacityMtPerDay?: number | null;
-    warehouseCapacityMt?: number | null;
-  }
-) {
-  return api<MasterGhatRow>(`/master-data/ghats/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
+const ghatsApi = masterCrud<MasterGhatRow, MasterGhatCreateBody, MasterGhatPatchBody>(
+  "/master-data/ghats"
+);
+export const fetchMasterGhats = ghatsApi.list;
+export const fetchMasterGhat = ghatsApi.fetchOne;
+export const createMasterGhat = ghatsApi.create;
+export const patchMasterGhat = ghatsApi.patch;
+export const softDeleteMasterGhat = ghatsApi.softDelete;
+export const purgeMasterGhat = ghatsApi.purge;
 
-export function softDeleteMasterGhat(id: string) {
-  return api<{ id: string; isActive: boolean }>(`/master-data/ghats/${encodeURIComponent(id)}`, {
-    method: "DELETE"
-  });
+// ---- SOF event types ------------------------------------------------------
+
+const sofEventTypesApi = masterCrud<
+  MasterSofEventTypeRow,
+  { name: string; scope: string; category?: "NORMAL" | "HOLD_DELAY" },
+  { name?: string; scope?: string; category?: "NORMAL" | "HOLD_DELAY"; isActive?: boolean }
+>("/master-data/sof-event-types");
+
+export const createMasterSofEventType = sofEventTypesApi.create;
+export const patchMasterSofEventType = sofEventTypesApi.patch;
+export function softDeleteMasterSofEventType(id: string) {
+  return api<MasterSofEventTypeRow>(
+    `/master-data/sof-event-types/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
 }
+export const purgeMasterSofEventType = sofEventTypesApi.purge;
 
 export function fetchSofEventTypeOptions(scope: "MOTHER_VESSEL" | "LIGHTER_VESSEL") {
   const sp = new URLSearchParams({ forSofScope: scope });
   return api<SofEventTypeOption[]>(`/master-data/sof-event-types/options?${sp}`);
 }
 
-export function fetchMasterSofEventTypes(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
+export function fetchMasterSofEventTypes(params: ListParams & {
   scope?: "MOTHER_VESSEL" | "LIGHTER_VESSEL" | "BOTH" | "ALL";
 }) {
   const sp = new URLSearchParams();
@@ -378,95 +310,44 @@ export function fetchMasterSofEventTypes(params: {
   if (params.includeInactive) sp.set("includeInactive", "true");
   if (params.scope && params.scope !== "ALL") sp.set("scope", params.scope);
   const q = sp.toString();
-  return api<Paginated<MasterSofEventTypeRow>>(`/master-data/sof-event-types${q ? `?${q}` : ""}`);
+  return api<Paginated<MasterSofEventTypeRow>>(
+    `/master-data/sof-event-types${q ? `?${q}` : ""}`
+  );
 }
 
-export function createMasterSofEventType(body: {
-  name: string;
-  scope: string;
-  category?: "NORMAL" | "HOLD_DELAY";
-}) {
-  return api<MasterSofEventTypeRow>("/master-data/sof-event-types", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+// ---- Users ----------------------------------------------------------------
 
-export function patchMasterSofEventType(
-  id: string,
-  body: {
-    name?: string;
-    scope?: string;
-    category?: "NORMAL" | "HOLD_DELAY";
-    isActive?: boolean;
-  }
-) {
-  return api<MasterSofEventTypeRow>(`/master-data/sof-event-types/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
-
-export function softDeleteMasterSofEventType(id: string) {
-  return api<MasterSofEventTypeRow>(`/master-data/sof-event-types/${encodeURIComponent(id)}`, {
-    method: "DELETE"
-  });
-}
-
-export function fetchMasterUsers(params: {
-  limit?: number;
-  cursor?: string;
-  search?: string;
-  includeInactive?: boolean;
-}) {
-  const sp = new URLSearchParams();
-  if (params.limit) sp.set("limit", String(params.limit));
-  if (params.cursor) sp.set("cursor", params.cursor);
-  if (params.search) sp.set("search", params.search);
-  if (params.includeInactive) sp.set("includeInactive", "true");
-  const q = sp.toString();
-  return api<Paginated<MasterUserRow>>(`/master-data/users${q ? `?${q}` : ""}`);
-}
-
-export function fetchMasterUser(id: string) {
-  return api<MasterUserRow>(`/master-data/users/${encodeURIComponent(id)}`);
-}
-
-export function createMasterUser(body: {
+export type MasterUserCreateBody = {
   email?: string | null;
   password: string;
   phone: string;
   fullName: string;
   organizationId?: string | null;
-}) {
-  return api<MasterUserRow>("/master-data/users", {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
-}
+};
+export type MasterUserPatchBody = {
+  email?: string | null;
+  phone?: string;
+  fullName?: string;
+  isActive?: boolean;
+  password?: string;
+  organizationId?: string | null;
+};
 
-export function patchMasterUser(
-  id: string,
-  body: {
-    email?: string | null;
-    phone?: string;
-    fullName?: string;
-    isActive?: boolean;
-    password?: string;
-    organizationId?: string | null;
-  }
-) {
-  return api<MasterUserRow>(`/master-data/users/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify(body)
-  });
-}
-
+const usersApi = masterCrud<MasterUserRow, MasterUserCreateBody, MasterUserPatchBody>(
+  "/master-data/users"
+);
+export const fetchMasterUsers = usersApi.list;
+export const fetchMasterUser = usersApi.fetchOne;
+export const createMasterUser = usersApi.create;
+export const patchMasterUser = usersApi.patch;
 export function softDeleteMasterUser(id: string) {
   return api<MasterUserRow>(`/master-data/users/${encodeURIComponent(id)}`, {
     method: "DELETE"
   });
 }
+export const purgeMasterUser = usersApi.purge;
+
+// ---- App roles + per-user role assignments --------------------------------
 
 export function fetchAppRoles() {
   return api<string[]>("/master-data/app-roles");
@@ -482,10 +363,10 @@ export function addUserRoleAssignment(
   userId: string,
   body: { role: string; locationId?: string | null }
 ) {
-  return api<UserRoleAssignmentRow>(`/master-data/users/${encodeURIComponent(userId)}/roles`, {
-    method: "POST",
-    body: JSON.stringify(body)
-  });
+  return api<UserRoleAssignmentRow>(
+    `/master-data/users/${encodeURIComponent(userId)}/roles`,
+    { method: "POST", body: JSON.stringify(body) }
+  );
 }
 
 export function addUserRoleAssignmentsBatch(
@@ -497,16 +378,15 @@ export function addUserRoleAssignmentsBatch(
   if (loc) payload.locationId = loc;
   return api<UserRoleAssignmentRow[]>(
     `/master-data/users/${encodeURIComponent(userId)}/roles/batch`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }
+    { method: "POST", body: JSON.stringify(payload) }
   );
 }
 
 export function removeUserRoleAssignment(userId: string, assignmentId: string) {
   return api<{ ok: true }>(
-    `/master-data/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(assignmentId)}`,
+    `/master-data/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(
+      assignmentId
+    )}`,
     { method: "DELETE" }
   );
 }

@@ -257,8 +257,12 @@ export function buildMotherLaytimeDailyLedger(params: {
     const k = ymd(dt.startOf("day"));
     const clock = dt.toFormat("HH:mm");
     const line = [clock, ev.eventType.replace(/_/g, " "), ev.remarks?.trim()].filter(Boolean).join(" · ");
-    if (!eventsByDay.has(k)) eventsByDay.set(k, []);
-    eventsByDay.get(k)!.push(line);
+    let bucket = eventsByDay.get(k);
+    if (!bucket) {
+      bucket = [];
+      eventsByDay.set(k, bucket);
+    }
+    bucket.push(line);
   }
 
   const rows: MotherLaytimeDailyLedgerRow[] = [];

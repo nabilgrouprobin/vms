@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { SofDetailPageSkeleton } from "@/components/sof/sof-detail-page-skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,21 +24,21 @@ import {
 } from "@/components/workspace/mother-lighter-picker";
 import { MotherLighterVesselPickerPanel } from "@/components/workspace/mother-lighter-vessel-picker-panel";
 import type { VesselSofWorkspaceSection } from "@/components/sof/detail/types";
-import { fetchLighterSofs, fetchLighterSof, fetchMotherSof, fetchMotherSofs } from "@/lib/sof-api";
-import { fetchLighterVesselsForPicker } from "@/lib/lighter-trips-api";
+import {
+  fetchLighterSofChipPeek,
+  fetchLighterSofs,
+  fetchMotherSofChipPeek,
+  fetchMotherSofs
+} from "@/lib/sof-api";
 import { parseApiErr } from "@/lib/parse-api-error";
-import { fetchVesselCall } from "@/lib/vessel-calls-api";
+import { fetchVesselCall, fetchVesselCalls } from "@/lib/vessel-calls-api";
 import {
   applySearchParams,
+  lighterSofNewPath,
   reportsDischargePath,
   VESSEL_SOF_CLEAR_SELECTION_EVENT
 } from "@/lib/workspace-paths";
-import type {
-  LighterSofListRow,
-  LighterVesselPickerRow,
-  MotherSofListRow,
-  VesselCallListRow
-} from "@/types/vms";
+import type { LighterSofListRow, MotherSofListRow, VesselCallListRow } from "@/types/vms";
 
 const MotherSofDetailView = dynamic(
   () =>
@@ -73,19 +74,6 @@ function sofPickerDetails(
     : "No trip";
 }
 
-type MotherSofChipPeek = {
-  sofNo: string;
-  vesselCall: { vessel: { name: string }; callNo: string } | null;
-};
-
-type LighterSofChipPeek = {
-  sofNo: string;
-  lighterTrip: {
-    lighterVessel: { name: string };
-    tripNo: string;
-    vesselCall: { vessel: { name: string }; callNo: string } | null;
-  } | null;
-};
 
 function VesselSofWorkspaceScaffoldInner({
   section,
@@ -99,23 +87,19 @@ function VesselSofWorkspaceScaffoldInner({
   const searchParams = useSearchParams();
   const kind: "mother" | "lighter" = searchParams.get("kind") === "lighter" ? "lighter" : "mother";
   const vesselCallId = searchParams.get("vesselCallId")?.trim() ?? "";
-  const lighterVesselId = searchParams.get("lighterVesselId")?.trim() ?? "";
+  const lighterCallId = searchParams.get("lighterCallId")?.trim() ?? "";
+  const legacyLighterHullId = searchParams.get("lighterVesselId")?.trim() ?? "";
   const id = searchParams.get("id")?.trim() ?? "";
   const pickSofMode = searchParams.get("pickSof") === "1";
   /** Stable snapshot — `searchParams` object identity changes often in Next.js; avoid effect churn / loops. */
   const searchParamsSnapshot = searchParams.toString();
 
-  const hasVesselSelection = kind === "mother" ? !!vesselCallId : !!lighterVesselId;
+  const hasVesselSelection = kind === "mother" ? !!vesselCallId : !!lighterCallId;
   const hasSofSelection = !!id;
 
   const [vesselSearch, setVesselSearch] = useState("");
-  const [debouncedVesselSearch, setDebouncedVesselSearch] = useState("");
+  const debouncedVesselSearch = useDebouncedValue(vesselSearch, 300);
   const [sofSearch, setSofSearch] = useState("");
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedVesselSearch(vesselSearch), 300);
-    return () => clearTimeout(t);
-  }, [vesselSearch]);
 
   /** “Change SOF” — back to vessel picker only (`?kind=mother` / `?kind=lighter`), no vessel or SOF ids. */
   const listHref = useMemo(() => {
@@ -125,6 +109,7 @@ function VesselSofWorkspaceScaffoldInner({
     return applySearchParams(pathname, searchParams, {
       id: null,
       vesselCallId: null,
+      lighterCallId: null,
       lighterVesselId: null,
       pickSof: null
     });
@@ -136,6 +121,7 @@ function VesselSofWorkspaceScaffoldInner({
         ? reportsDischargePath(kind, { pickSof: null })
         : applySearchParams(pathname, searchParams, {
             vesselCallId: null,
+            lighterCallId: null,
             lighterVesselId: null,
             id: null,
             pickSof: null
@@ -145,7 +131,6 @@ function VesselSofWorkspaceScaffoldInner({
 
   const setKind = (next: "mother" | "lighter") => {
     setVesselSearch("");
-    setDebouncedVesselSearch("");
     setSofSearch("");
     if (reportsLinkBase) {
       router.replace(reportsDischargePath(next, { pickSof: null }), { scroll: false });
@@ -155,6 +140,7 @@ function VesselSofWorkspaceScaffoldInner({
       applySearchParams(pathname, searchParams, {
         kind: next,
         vesselCallId: null,
+        lighterCallId: null,
         lighterVesselId: null,
         id: null,
         pickSof: null
@@ -191,6 +177,7 @@ function VesselSofWorkspaceScaffoldInner({
       applySearchParams(pathname, searchParams, {
         kind: "mother",
         vesselCallId: row.id,
+        lighterCallId: null,
         lighterVesselId: null,
         id: sofId ?? null,
         pickSof: null
@@ -199,11 +186,12 @@ function VesselSofWorkspaceScaffoldInner({
     );
   };
 
-  const selectLighterHullRow = async (row: LighterVesselPickerRow) => {
+  const selectLighterCallRow = async (row: VesselCallListRow) => {
     setSofSearch("");
+    const hullId = row.vessel.id;
     let sofId: string | null = null;
     try {
-      const page = await fetchLighterSofs({ lighterVesselId: row.id, limit: 25 });
+      const page = await fetchLighterSofs({ lighterVesselId: hullId, limit: 25 });
       const list = page.data;
       sofId = list.length === 1 ? list[0].id : null;
     } catch {
@@ -212,7 +200,7 @@ function VesselSofWorkspaceScaffoldInner({
     if (reportsLinkBase) {
       router.replace(
         reportsDischargePath("lighter", {
-          lighterVesselId: row.id,
+          lighterCallId: row.id,
           id: sofId,
           pickSof: null
         }),
@@ -223,7 +211,8 @@ function VesselSofWorkspaceScaffoldInner({
     router.replace(
       applySearchParams(pathname, searchParams, {
         kind: "lighter",
-        lighterVesselId: row.id,
+        lighterCallId: row.id,
+        lighterVesselId: null,
         vesselCallId: null,
         id: sofId ?? null,
         pickSof: null
@@ -238,7 +227,7 @@ function VesselSofWorkspaceScaffoldInner({
         reportsDischargePath(kind, {
           id: rowId,
           vesselCallId: vesselCallId || null,
-          lighterVesselId: lighterVesselId || null,
+          lighterCallId: lighterCallId || null,
           pickSof: null
         }),
         { scroll: false }
@@ -263,12 +252,55 @@ function VesselSofWorkspaceScaffoldInner({
     enabled: kind === "mother" && !!vesselCallId && !hasSofSelection
   });
 
-  const lighterHullMetaQ = useQuery({
-    queryKey: ["lighter-hull-meta", lighterVesselId],
-    queryFn: () =>
-      fetchLighterVesselsForPicker(undefined, 5, lighterVesselId).then((r) => r[0] ?? null),
-    enabled: kind === "lighter" && !!lighterVesselId && !hasSofSelection
+  const lighterCallMetaQ = useQuery({
+    queryKey: ["lighter-call-meta", lighterCallId],
+    queryFn: () => fetchVesselCall(lighterCallId),
+    enabled: kind === "lighter" && !!lighterCallId && !hasSofSelection
   });
+
+  const lighterHullIdResolved = lighterCallMetaQ.data?.vessel.id ?? "";
+
+  const legacyLighterCallResolveQ = useQuery({
+    queryKey: ["legacy-lighter-hull-to-call", legacyLighterHullId],
+    queryFn: () =>
+      fetchVesselCalls({
+        hullKind: "lighter",
+        vesselId: legacyLighterHullId,
+        limit: 10
+      }),
+    enabled:
+      kind === "lighter" &&
+      !lighterCallId &&
+      !!legacyLighterHullId &&
+      !hasSofSelection &&
+      !id
+  });
+
+  useEffect(() => {
+    if (kind !== "lighter" || lighterCallId || !legacyLighterHullId || id) return;
+    if (!legacyLighterCallResolveQ.isSuccess || legacyLighterCallResolveQ.isFetching) return;
+    const rows = legacyLighterCallResolveQ.data?.data ?? [];
+    if (rows.length === 0) return;
+    const chosen = rows[0]!;
+    router.replace(
+      applySearchParams(pathname, searchParams, {
+        lighterCallId: chosen.id,
+        lighterVesselId: null
+      }),
+      { scroll: false }
+    );
+  }, [
+    kind,
+    lighterCallId,
+    legacyLighterHullId,
+    id,
+    legacyLighterCallResolveQ.isSuccess,
+    legacyLighterCallResolveQ.isFetching,
+    legacyLighterCallResolveQ.data,
+    pathname,
+    searchParamsSnapshot,
+    router
+  ]);
 
   const motherProbeQ = useQuery({
     queryKey: ["vessel-sof-mother-sof-probe", vesselCallId],
@@ -277,9 +309,9 @@ function VesselSofWorkspaceScaffoldInner({
   });
 
   const lighterProbeQ = useQuery({
-    queryKey: ["vessel-sof-lighter-sof-probe", lighterVesselId],
-    queryFn: () => fetchLighterSofs({ lighterVesselId, limit: 25 }),
-    enabled: kind === "lighter" && !!lighterVesselId && !id
+    queryKey: ["vessel-sof-lighter-sof-probe", lighterHullIdResolved],
+    queryFn: () => fetchLighterSofs({ lighterVesselId: lighterHullIdResolved, limit: 25 }),
+    enabled: kind === "lighter" && !!lighterCallId && !!lighterHullIdResolved && !id
   });
 
   useEffect(() => {
@@ -318,20 +350,20 @@ function VesselSofWorkspaceScaffoldInner({
   ]);
 
   useEffect(() => {
-    if (pickSofMode || kind !== "lighter" || !lighterVesselId || id) return;
+    if (pickSofMode || kind !== "lighter" || !lighterCallId || !lighterHullIdResolved || id) return;
     if (!lighterProbeQ.isSuccess || lighterProbeQ.isFetching) return;
     const rows = lighterProbeQ.data?.data ?? [];
     if (rows.length !== 1) return;
     if (reportsLinkBase) {
       router.replace(
-        reportsDischargePath("lighter", { lighterVesselId, id: rows[0].id, pickSof: null }),
+        reportsDischargePath("lighter", { lighterCallId, id: rows[0].id, pickSof: null }),
         { scroll: false }
       );
     } else {
       router.replace(
         applySearchParams(pathname, searchParams, {
           kind: "lighter",
-          lighterVesselId,
+          lighterCallId,
           id: rows[0].id,
           pickSof: null
         }),
@@ -341,7 +373,8 @@ function VesselSofWorkspaceScaffoldInner({
   }, [
     pickSofMode,
     kind,
-    lighterVesselId,
+    lighterCallId,
+    lighterHullIdResolved,
     id,
     lighterProbeQ.isSuccess,
     lighterProbeQ.isFetching,
@@ -357,16 +390,17 @@ function VesselSofWorkspaceScaffoldInner({
 
   const showLighterDisambig =
     kind === "lighter" &&
-    !!lighterVesselId &&
+    !!lighterCallId &&
+    !!lighterHullIdResolved &&
     !id &&
     lighterProbeQ.isSuccess &&
     nLighterProbe > 1;
 
   const lighterDisambigQ = useQuery({
-    queryKey: ["vessel-sof-lighter-disambig", lighterVesselId, sofSearch],
+    queryKey: ["vessel-sof-lighter-disambig", lighterHullIdResolved, sofSearch],
     queryFn: () =>
       fetchLighterSofs({
-        lighterVesselId,
+        lighterVesselId: lighterHullIdResolved,
         limit: 40,
         search: sofSearch || undefined
       }),
@@ -386,13 +420,13 @@ function VesselSofWorkspaceScaffoldInner({
 
   const motherPeekQ = useQuery({
     queryKey: ["mother-sof", id, "workspace-chip"],
-    queryFn: () => fetchMotherSof(id) as Promise<MotherSofChipPeek>,
+    queryFn: () => fetchMotherSofChipPeek(id),
     enabled: hasSofSelection && kind === "mother"
   });
 
   const lighterPeekQ = useQuery({
     queryKey: ["lighter-sof", id, "workspace-chip"],
-    queryFn: () => fetchLighterSof(id) as Promise<LighterSofChipPeek>,
+    queryFn: () => fetchLighterSofChipPeek(id),
     enabled: hasSofSelection && kind === "lighter"
   });
 
@@ -411,7 +445,7 @@ function VesselSofWorkspaceScaffoldInner({
       ? "Several SOFs exist for this lighter. Pick one above."
       : hasVesselSelection
         ? `Opening ${sectionTitle.toLowerCase()} for this vessel…`
-        : `Choose a mother vessel call or lighter hull. When there is exactly one SOF for that vessel, it opens below automatically.`;
+        : `Choose a mother vessel call or lighter port call. When there is exactly one lighter SOF for that hull, it opens below automatically.`;
 
   const selectedChipTitle = selectedRow
     ? selectedRow.sofNo
@@ -447,11 +481,20 @@ function VesselSofWorkspaceScaffoldInner({
         }`
       : vesselCallId || "";
 
-  const selectedLighterHullTitle =
-    lighterHullMetaQ.data?.name ?? (lighterVesselId ? "Selected lighter" : "");
-  const selectedLighterHullDetails = lighterHullMetaQ.data?.imoNo
-    ? `IMO ${lighterHullMetaQ.data.imoNo}`
-    : lighterVesselId || "";
+  const selectedLighterCallTitle =
+    lighterCallMetaQ.data != null
+      ? `${lighterCallMetaQ.data.callNo} · ${lighterCallMetaQ.data.vessel.name}`
+      : lighterCallId
+        ? "Lighter port call"
+        : "";
+  const selectedLighterCallDetails =
+    lighterCallMetaQ.data != null
+      ? `${lighterCallMetaQ.data.status}${
+          lighterCallMetaQ.data.cargoNameSnapshot
+            ? ` · ${lighterCallMetaQ.data.cargoNameSnapshot}`
+            : ""
+        }`
+      : lighterCallId || "";
 
   const topChrome = (() => {
     if (hasSofSelection) {
@@ -469,9 +512,9 @@ function VesselSofWorkspaceScaffoldInner({
       return (
         <SelectedSofChip
           kind={kind}
-          title={kind === "mother" ? selectedMotherVesselTitle : selectedLighterHullTitle}
+          title={kind === "mother" ? selectedMotherVesselTitle : selectedLighterCallTitle}
           details={
-            (kind === "mother" ? selectedMotherVesselDetails : selectedLighterHullDetails) ||
+            (kind === "mother" ? selectedMotherVesselDetails : selectedLighterCallDetails) ||
             undefined
           }
           changeLabel="Change vessel"
@@ -484,17 +527,26 @@ function VesselSofWorkspaceScaffoldInner({
       <MotherLighterVesselPickerPanel
         kind={kind}
         vesselCallId={vesselCallId}
-        lighterVesselId={lighterVesselId}
+        lighterCallId={lighterCallId}
         search={vesselSearch}
         debouncedSearch={debouncedVesselSearch}
         onSearchChange={setVesselSearch}
         onKindChange={setKind}
         onSelectMother={selectMotherVesselRow}
-        onSelectLighter={selectLighterHullRow}
+        onSelectLighter={selectLighterCallRow}
         queriesEnabled={!hasSofSelection && !hasVesselSelection}
         trailing={
           <Button variant="outline" size="sm" className="w-full lg:w-auto" asChild>
-            <Link href={kind === "mother" ? "/mother-sof/new" : "/lighter-sof/new"}>
+            <Link
+              href={
+                kind === "mother"
+                  ? "/mother-sof/new"
+                  : lighterSofNewPath({
+                      lighterCallId: lighterCallId || null,
+                      lighterVesselId: legacyLighterHullId || null
+                    })
+              }
+            >
               New {kind === "mother" ? "mother" : "lighter"} SOF
             </Link>
           </Button>
@@ -512,7 +564,14 @@ function VesselSofWorkspaceScaffoldInner({
           placeholder="Search SOF no. or trip…"
           trailing={
             <Button variant="outline" size="sm" className="w-full lg:w-auto" asChild>
-              <Link href="/lighter-sof/new">New lighter SOF</Link>
+              <Link
+                href={lighterSofNewPath({
+                  lighterCallId: lighterCallId || null,
+                  lighterVesselId: legacyLighterHullId || null
+                })}
+              >
+                New lighter SOF
+              </Link>
             </Button>
           }
         />
@@ -545,12 +604,17 @@ function VesselSofWorkspaceScaffoldInner({
   const showMotherNoSof =
     kind === "mother" && !!vesselCallId && !id && motherProbeQ.isSuccess && nMotherProbe === 0;
   const showLighterNoSof =
-    kind === "lighter" && !!lighterVesselId && !id && lighterProbeQ.isSuccess && nLighterProbe === 0;
+    kind === "lighter" &&
+    !!lighterCallId &&
+    !!lighterHullIdResolved &&
+    !id &&
+    lighterProbeQ.isSuccess &&
+    nLighterProbe === 0;
 
   const showMotherProbeErr =
     kind === "mother" && !!vesselCallId && !id && motherProbeQ.isError;
   const showLighterProbeErr =
-    kind === "lighter" && !!lighterVesselId && !id && lighterProbeQ.isError;
+    kind === "lighter" && !!lighterCallId && !!lighterHullIdResolved && !id && lighterProbeQ.isError;
 
   const bodyLoadingMother =
     kind === "mother" &&
@@ -561,10 +625,12 @@ function VesselSofWorkspaceScaffoldInner({
     !motherProbeQ.isError;
   const bodyLoadingLighter =
     kind === "lighter" &&
-    !!lighterVesselId &&
+    !!lighterCallId &&
     !id &&
-    lighterProbeQ.isPending &&
+    (lighterCallMetaQ.isPending ||
+      (!!lighterHullIdResolved && lighterProbeQ.isPending)) &&
     !pickSofMode &&
+    !lighterCallMetaQ.isError &&
     !lighterProbeQ.isError;
 
   return (
@@ -635,7 +701,14 @@ function VesselSofWorkspaceScaffoldInner({
                 No lighter SOF exists for this hull yet. Create one to use {sectionTitle.toLowerCase()}.
               </p>
               <Button asChild variant="secondary">
-                <Link href="/lighter-sof/new">Create lighter SOF</Link>
+                <Link
+                  href={lighterSofNewPath({
+                    lighterCallId: lighterCallId || null,
+                    lighterVesselId: legacyLighterHullId || null
+                  })}
+                >
+                  Create lighter SOF
+                </Link>
               </Button>
             </CardContent>
           </Card>
@@ -646,11 +719,12 @@ function VesselSofWorkspaceScaffoldInner({
         ) : (
           <Card className="w-full">
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Select a mother vessel call or lighter hull above to view {sectionTitle.toLowerCase()}.
+              Select a mother vessel call or lighter port call above to view {sectionTitle.toLowerCase()}.
             </CardContent>
           </Card>
         )}
       </div>
+
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MasterDataCsvToolbar } from "@/components/data-table/master-data-csv-toolbar";
 import { MasterDataCardHeader } from "@/components/master-data/master-data-card-header";
@@ -14,13 +14,14 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PaginationBar } from "@/components/data-table/pagination-bar";
-import { useCursorBackedPagination } from "@/hooks/use-cursor-backed-pagination";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { getUserProfile } from "@/lib/auth-storage";
+import { useMasterCrud } from "@/hooks/use-master-crud";
+import { useUserProfile } from "@/components/providers/auth-provider";
 import {
   createMasterSofEventType,
   fetchMasterSofEventTypes,
   patchMasterSofEventType,
+  purgeMasterSofEventType,
   softDeleteMasterSofEventType
 } from "@/lib/master-data-api";
 import {
@@ -30,12 +31,13 @@ import {
 } from "@/lib/master-data-csv-bridge";
 import { canEditMasterData } from "@/lib/master-data-permissions";
 import { parseApiErr } from "@/lib/parse-api-error";
+import { masterDataKeys } from "@/lib/query-keys";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   SOF_EVENT_TYPE_CATEGORIES,
   SOF_EVENT_TYPE_SCOPES,
   type MasterSofEventTypeRow,
-  type Paginated,
   type SofEventTypeCategoryUi
 } from "@/types/vms";
 
@@ -43,7 +45,7 @@ type SofAdminScopeTab = "ALL" | "MOTHER_VESSEL" | "LIGHTER_VESSEL" | "BOTH";
 
 export function MasterSofEventTypesCrudPage() {
   const qc = useQueryClient();
-  const profile = useMemo(() => getUserProfile(), []);
+  const profile = useUserProfile();
   const canEdit = canEditMasterData(profile);
   const readOnly = !canEdit;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -68,43 +70,29 @@ export function MasterSofEventTypesCrudPage() {
     if (!sheetOpen) setFormError(null);
   }, [sheetOpen]);
 
-  const listQ = useInfiniteQuery({
-    queryKey: ["master-sof-event-types", debouncedSearch, includeInactive, scopeTab],
-    initialPageParam: undefined as string | undefined,
-    staleTime: 30_000,
-    queryFn: async ({ pageParam }) =>
-      fetchMasterSofEventTypes({
-        limit: 24,
-        cursor: pageParam,
-        search: debouncedSearch || undefined,
-        includeInactive,
-        scope: scopeTab
-      }),
-    getNextPageParam: (last: Paginated<MasterSofEventTypeRow>) => last.nextCursor ?? undefined
-  });
-
-  const rows = useMemo(
-    () => listQ.data?.pages.flatMap((p) => p.data) ?? [],
-    [listQ.data]
+  const fetchScopedEventTypes = useCallback(
+    (params: { limit?: number; cursor?: string; search?: string; includeInactive?: boolean }) =>
+      fetchMasterSofEventTypes({ ...params, scope: scopeTab }),
+    [scopeTab]
   );
 
-  const listResetKey = useMemo(
-    () => `${debouncedSearch}\u0000${includeInactive ? "1" : "0"}\u0000${scopeTab}`,
-    [debouncedSearch, includeInactive, scopeTab]
-  );
-
-  const pager = useCursorBackedPagination({
-    items: rows,
-    hasNextPage: Boolean(listQ.hasNextPage),
-    fetchNextPage: () => void listQ.fetchNextPage(),
-    isFetchingNextPage: listQ.isFetchingNextPage,
-    resetKey: listResetKey
+  const {
+    listQ,
+    pager,
+    deleteM,
+    purgeM,
+    invalidateList: invalidatePickers,
+    runRowAction
+  } = useMasterCrud<MasterSofEventTypeRow>({
+    queryKey: masterDataKeys.sofEventTypes(scopeTab),
+    fetchList: fetchScopedEventTypes,
+    search: debouncedSearch,
+    includeInactive,
+    softDelete: (id) => softDeleteMasterSofEventType(id),
+    purge: purgeMasterSofEventType,
+    extraInvalidateKeys: [["sof-event-type-options"]]
   });
-
-  const invalidatePickers = async () => {
-    await qc.invalidateQueries({ queryKey: ["sof-event-type-options"] });
-    await qc.invalidateQueries({ queryKey: ["master-sof-event-types"] });
-  };
+  const rows = pager.pageItems;
 
   const openCreate = () => {
     setCreating(true);
@@ -145,24 +133,23 @@ export function MasterSofEventTypesCrudPage() {
     },
     onSuccess: async (updated) => {
       await invalidatePickers();
-      await qc.refetchQueries({ queryKey: ["master-sof-event-types"] });
+      await qc.refetchQueries({ queryKey: masterDataKeys.sofEventTypes() });
       if (updated && typeof updated === "object" && "id" in updated) {
-        setEditing((prev) => (prev?.id === (updated as MasterSofEventTypeRow).id ? (updated as MasterSofEventTypeRow) : prev));
+        setEditing((prev) =>
+          prev?.id === (updated as MasterSofEventTypeRow).id
+            ? (updated as MasterSofEventTypeRow)
+            : prev
+        );
       }
       setSheetOpen(false);
     },
     onError: (e: unknown) => setFormError(parseApiErr(e))
   });
 
-  const deleteM = useMutation({
-    mutationFn: (id: string) => softDeleteMasterSofEventType(id),
-    onSuccess: async () => {
-      await invalidatePickers();
-    }
-  });
-
+  /** Custom restore: refresh open `editing` row after success so the toggle flips. */
   const restoreM = useMutation({
-    mutationFn: (row: MasterSofEventTypeRow) => patchMasterSofEventType(row.id, { isActive: true }),
+    mutationFn: (row: MasterSofEventTypeRow) =>
+      patchMasterSofEventType(row.id, { isActive: true }),
     onSuccess: async (updated) => {
       await invalidatePickers();
       setEditing((prev) => (prev?.id === updated.id ? updated : prev));
@@ -189,7 +176,7 @@ export function MasterSofEventTypesCrudPage() {
         scope: scopeTab
       });
     } catch (e) {
-      window.alert(parseApiErr(e));
+      toast.error(parseApiErr(e));
     } finally {
       setExportBusy(false);
     }
@@ -203,11 +190,10 @@ export function MasterSofEventTypesCrudPage() {
     try {
       const text = await file.text();
       const summary = await importSofEventTypesCsv(text);
-      await qc.invalidateQueries({ queryKey: ["master-sof-event-types"] });
-      await qc.invalidateQueries({ queryKey: ["sof-event-type-options"] });
-      window.alert(formatCsvImportSummary("Import finished.", summary));
+      await invalidatePickers();
+      toast.success(formatCsvImportSummary("Import finished.", summary));
     } catch (err) {
-      window.alert(parseApiErr(err));
+      toast.error(parseApiErr(err));
     } finally {
       setImportBusy(false);
     }
@@ -323,37 +309,49 @@ export function MasterSofEventTypesCrudPage() {
                               variant="destructive"
                               size="sm"
                               disabled={deleteM.isPending}
-                              onClick={() => {
-                                if (
-                                  !window.confirm(
-                                    `Archive type “${row.name}”? Existing SOF rows keep their link; new events cannot pick it until restored or recreated.`
-                                  )
-                                ) {
-                                  return;
-                                }
-                                deleteM.mutate(row.id, {
-                                  onError: (e) => window.alert(parseApiErr(e))
-                                });
-                              }}
+                              onClick={() =>
+                                runRowAction(
+                                  deleteM,
+                                  row.id,
+                                  `Archive type “${row.name}”? Existing SOF rows keep their link; new events cannot pick it until restored or recreated.`
+                                )
+                              }
                             >
                               Delete
                             </Button>
                           ) : null}
                           {canEdit && row.deletedAt !== null ? (
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              disabled={restoreM.isPending}
-                              onClick={() => {
-                                if (!window.confirm(`Restore type “${row.name}”?`)) return;
-                                restoreM.mutate(row, {
-                                  onError: (e: unknown) => window.alert(parseApiErr(e))
-                                });
-                              }}
-                            >
-                              Restore
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={restoreM.isPending}
+                                onClick={() => {
+                                  if (!window.confirm(`Restore type “${row.name}”?`)) return;
+                                  restoreM.mutate(row, {
+                                    onError: (e: unknown) => toast.error(parseApiErr(e))
+                                  });
+                                }}
+                              >
+                                Restore
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                disabled={purgeM.isPending}
+                                onClick={() =>
+                                  runRowAction(
+                                    purgeM,
+                                    row.id,
+                                    `Permanently delete SOF event type “${row.name}”? This cannot be undone. It only succeeds when no SOF events or hourly rows reference this type (${row._count.sofEvents} events now).`
+                                  )
+                                }
+                              >
+                                Delete forever
+                              </Button>
+                            </>
                           ) : null}
                         </div>
                       </td>
@@ -463,7 +461,7 @@ export function MasterSofEventTypesCrudPage() {
               onClick={() => {
                 if (!editing || !window.confirm(`Restore “${editing.name}”?`)) return;
                 restoreM.mutate(editing, {
-                  onError: (e: unknown) => window.alert(parseApiErr(e))
+                  onError: (e: unknown) => toast.error(parseApiErr(e))
                 });
               }}
             >

@@ -14,6 +14,7 @@ import { formatDt } from "@/lib/format";
 import { formatDecimalHoursToDaysHMin, formatDecimalHoursToTotalHoursMin } from "@/lib/laytime-hours-format";
 import { fetchImportContract, patchImportContract } from "@/lib/import-contracts-api";
 import { parseApiErr } from "@/lib/parse-api-error";
+import { toast } from "@/lib/toast";
 import { patchVesselCall } from "@/lib/vessel-calls-api";
 import { vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import { cn } from "@/lib/utils";
@@ -341,7 +342,7 @@ export function ImportContractLaytimeForm({
       void qc.invalidateQueries({ queryKey: ["import-contract", contractId] });
       onUnlinked?.();
     },
-    onError: (e) => alert(parseApiErr(e))
+    onError: (e) => toast.error(parseApiErr(e))
   });
 
   if (q.isLoading) {
