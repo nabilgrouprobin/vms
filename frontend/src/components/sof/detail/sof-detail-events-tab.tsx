@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { SofEventsTable } from "@/components/sof/sof-events-table";
+import { SofEventsTimeSummary } from "@/components/sof/sof-events-time-summary";
 import { Button } from "@/components/ui/button";
 import type { SofEventListItem, SofEventTypeOption } from "@/types/vms";
 
@@ -31,6 +32,8 @@ type SofDetailEventsTabProps = {
   showStatusColumn?: boolean;
   onEventsChanged?: () => void;
   pagination: SofDetailEventsTabPagination;
+  /** When true, the "Fill gap" buttons render in a disabled "Preparing…" state. */
+  fillGapPreparing?: boolean;
 };
 
 /** Shared layout: context panel, add-event row, events table with infinite footer. */
@@ -45,13 +48,16 @@ export function SofDetailEventsTab({
   eventsCsvBasename,
   showStatusColumn,
   onEventsChanged,
-  pagination
+  pagination,
+  fillGapPreparing
 }: SofDetailEventsTabProps) {
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = pagination;
 
   return (
     <div className="space-y-3">
       {contextPanel}
+
+      <SofEventsTimeSummary events={events} hasUnloadedHistory={hasNextPage} />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
         <Button
@@ -74,6 +80,8 @@ export function SofDetailEventsTab({
         showStatusColumn={showStatusColumn}
         onEventsChanged={onEventsChanged}
         onFillGap={addEventDisabled ? undefined : (prefill) => onAddEvent(prefill)}
+        fillGapPreparing={fillGapPreparing}
+        hasUnloadedHistory={hasNextPage}
         footer={
           hasNextPage ? (
             <Button

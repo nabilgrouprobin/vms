@@ -64,7 +64,7 @@ export class MasterOrganizationTypesService {
       select: rowSelect
     });
 
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
     return { data: rows.slice(0, limit), nextCursor, limit };
   }
 

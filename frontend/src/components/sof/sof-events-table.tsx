@@ -15,6 +15,7 @@ import { formatDt } from "@/lib/format";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { toast } from "@/lib/toast";
 import {
+  findSofTimelineGaps,
   formatDurationSpanMs,
   sofEventOwnWindow,
   sortSofEventsChronoAsc,
@@ -42,9 +43,6 @@ function escapeCsvCell(value: string): string {
   }
   return value;
 }
-
-/** Ignore sub-minute differences when scanning for gaps. */
-const GAP_MIN_MS = 60_000;
 
 type EventRow = {
   kind: "event";
@@ -84,6 +82,20 @@ type SofEventsTableProps = {
    * the gap's [start, end] ISO strings. Hidden in read-only mode.
    */
   onFillGap?: (prefill: { startIso: string; endIso: string }) => void;
+  /**
+   * When true the "Fill gap" buttons render disabled with a "Preparing…"
+   * label — used while the parent view is refreshing the events list so
+   * the eventual pre-fill matches reality instead of the stale cache.
+   */
+  fillGapPreparing?: boolean;
+  /**
+   * True when more pages of older events remain unloaded (e.g.
+   * `useInfiniteQuery.hasNextPage`). When true, gap detection is suppressed
+   * because an apparent "gap" between two loaded rows might actually be
+   * filled by an event sitting in an unloaded page; clicking "Fill gap"
+   * would then be rejected by the backend as "events cannot overlap".
+   */
+  hasUnloadedHistory?: boolean;
 };
 
 export function SofEventsTable({
@@ -96,7 +108,9 @@ export function SofEventsTable({
   eventsCsvBasename,
   onEventsChanged,
   showStatusColumn = true,
-  onFillGap
+  onFillGap,
+  fillGapPreparing = false,
+  hasUnloadedHistory = false
 }: SofEventsTableProps) {
   const qc = useQueryClient();
   const [edit, setEdit] = useState<SofEventListItem | null>(null);
@@ -123,33 +137,45 @@ export function SofEventsTable({
     });
   }, [sortedAsc]);
 
-  /** Asc list with gap placeholders inserted between adjacent windows that don't touch. */
+  /**
+   * Asc list with gap placeholders interleaved between adjacent event windows.
+   *
+   * Gap detection is shared with the backend via `findSofTimelineGaps`: rows
+   * WITHOUT their own duration implicitly fill the period from the previous
+   * row's end to their `eventTime`, so no "Fill gap" affordance is shown
+   * before them (otherwise the backend would reject the resulting insert as
+   * "events cannot overlap").
+   *
+   * When `hasUnloadedHistory` is true we skip gap detection entirely: the
+   * apparent gap between two adjacent loaded rows might be filled by an
+   * older event sitting on a page the user hasn't loaded yet. We surface
+   * that explicitly via the `listNote` instead of a misleading red "gap" row.
+   */
   const displayAsc = useMemo<DisplayRow[]>(() => {
     if (ownWindowsAsc.length === 0) return [];
+    if (hasUnloadedHistory) return ownWindowsAsc;
+    const gaps = findSofTimelineGaps(ownWindowsAsc);
+    if (gaps.length === 0) return ownWindowsAsc;
+    const gapByCurrStart = new Map(gaps.map((g) => [new Date(g.toIso).getTime(), g]));
     const out: DisplayRow[] = [];
-    let prevEndMs: number | null = null;
-    for (let i = 0; i < ownWindowsAsc.length; i++) {
-      const row = ownWindowsAsc[i]!;
+    for (const row of ownWindowsAsc) {
       const currStartMs = row.fromIso
         ? new Date(row.fromIso).getTime()
         : new Date(row.toIso).getTime();
-      if (prevEndMs !== null && currStartMs - prevEndMs > GAP_MIN_MS) {
-        const fromIso = new Date(prevEndMs).toISOString();
-        const toIso = new Date(currStartMs).toISOString();
+      const gap = gapByCurrStart.get(currStartMs);
+      if (gap) {
         out.push({
           kind: "gap",
-          id: `gap-${prevEndMs}-${currStartMs}`,
-          fromIso,
-          toIso,
-          durationLabel: formatDurationSpanMs(currStartMs - prevEndMs)
+          id: `gap-${new Date(gap.fromIso).getTime()}-${currStartMs}`,
+          fromIso: gap.fromIso,
+          toIso: gap.toIso,
+          durationLabel: formatDurationSpanMs(gap.spanMs)
         });
       }
       out.push(row);
-      const currEndMs = new Date(row.toIso).getTime();
-      prevEndMs = prevEndMs === null ? currEndMs : Math.max(prevEndMs, currEndMs);
     }
     return out;
-  }, [ownWindowsAsc]);
+  }, [ownWindowsAsc, hasUnloadedHistory]);
 
   /** Newest first in the UI. */
   const displayDesc = useMemo(() => [...displayAsc].reverse(), [displayAsc]);
@@ -233,11 +259,19 @@ export function SofEventsTable({
     URL.revokeObjectURL(url);
   };
 
+  /**
+   * Hard-delete an SOF event. The mutation also forces a refetch of the
+   * events list and notifies the parent (`onEventsChanged`) so the SOF
+   * detail (laytime totals, gap rows, latest-event metrics) recomputes
+   * immediately. We surface a success toast so the user can confirm the
+   * row really is gone from the database, not just from the cached view.
+   */
   const delMut = useMutation({
     mutationFn: (eventId: string) => deleteSofEvent(eventId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: [...eventsQueryKey] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: [...eventsQueryKey], refetchType: "active" });
       onEventsChanged?.();
+      toast.success("Event deleted");
     },
     onError: (e) => toast.error(parseApiErr(e))
   });
@@ -254,7 +288,19 @@ export function SofEventsTable({
         <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1.5">
             <CardTitle>Events</CardTitle>
-            <CardDescription>{listNote}</CardDescription>
+            <CardDescription>
+              {listNote}
+              {hasUnloadedHistory ? (
+                <>
+                  <br />
+                  <span className="text-amber-600 dark:text-amber-400">
+                    Older events are not yet loaded — use “More events” below before
+                    judging whether a period is missing. Gap markers are hidden until the
+                    full timeline is loaded to avoid false positives.
+                  </span>
+                </>
+              ) : null}
+            </CardDescription>
           </div>
           {eventsCsvBasename && sortedAsc.length > 0 ? (
             <Button
@@ -328,13 +374,14 @@ export function SofEventsTable({
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                disabled={fillGapPreparing}
                                 className="gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
                                 onClick={() =>
                                   onFillGap({ startIso: row.fromIso, endIso: row.toIso })
                                 }
                               >
                                 <Plus className="size-3.5" aria-hidden />
-                                Fill gap
+                                {fillGapPreparing ? "Preparing…" : "Fill gap"}
                               </Button>
                             ) : null}
                           </td>

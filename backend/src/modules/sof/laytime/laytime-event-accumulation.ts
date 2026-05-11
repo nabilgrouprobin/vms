@@ -1,4 +1,36 @@
-/** Pure laytime segment rules shared by mother & lighter recalculation (testable). */
+/* ============================================================== *
+ *  Standard SOF (Statement of Facts) laytime accumulation
+ *
+ *  Closing-event rule (BIMCO / industry standard):
+ *
+ *      segment(i) = [ events[i-1].eventTime, events[i].eventTime ]
+ *      Δt(i)      = events[i].eventTime - events[i-1].eventTime
+ *
+ *      if events[i].countsAsLaytime:
+ *          used     += chunk(i)
+ *      else:
+ *          excluded += chunk(i)
+ *
+ *  where `chunk(i)` is either an explicit per-event override
+ *  (`laytimeImpactHours` >= 0) or the wall-clock Δt(i) by default.
+ *
+ *  `countsAsLaytime` is driven by the SOF event type's master `category`:
+ *  - NORMAL      → countsAsLaytime = true   (working time / used laytime)
+ *  - HOLD_DELAY  → countsAsLaytime = false  (idle / excluded laytime)
+ *
+ *  Downstream money (computed in `LaytimeCalculationService`):
+ *
+ *      allowed = (cargoQtyMt / dischargeRateMtPerDay) * 24
+ *                OR manual override from the charter party
+ *      balance = allowed - used
+ *      demurrage_hours = max(0, used - allowed)
+ *      dispatch_hours  = max(0, allowed - used)
+ *      demurrage_amount = (demurrage_hours / 24) * demurrage_rate_per_day
+ *      dispatch_amount  = (dispatch_hours / 24) * dispatch_rate_per_day
+ *      net_amount       = demurrage_amount - dispatch_amount
+ *
+ *  Pure functions — no Prisma dependency, fully unit-testable.
+ * ============================================================== */
 
 export function hoursBetweenNonNegative(a: Date, b: Date): number {
   return Math.max(0, (b.getTime() - a.getTime()) / 3_600_000);

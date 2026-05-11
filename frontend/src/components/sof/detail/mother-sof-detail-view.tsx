@@ -15,6 +15,7 @@ import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-ta
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
 import { useUserProfile } from "@/components/providers/auth-provider";
+import { useAutoLoadAllPages } from "@/hooks/use-auto-load-all-pages";
 import { LaytimeSnapshotToolbar } from "@/components/sof/laytime-snapshot-toolbar";
 
 import {
@@ -40,6 +41,8 @@ import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
 import {
   flatSofEventInfinitePages,
   latestSofEventMetrics,
+  resolveFreshSofGapForClick,
+  sortSofEventsChronoAsc,
   toDatetimeLocalValue as toLocalDtInput,
   type SofEventInfinitePages
 } from "@/lib/sof-event-display";
@@ -130,6 +133,17 @@ export function MotherSofDetailView({
     getNextPageParam: (last: Paginated<SofEventListItem>) => last.nextCursor ?? undefined
   });
 
+  // Eagerly fetch the whole timeline so gap detection and the "Fill gap" pre-fill
+  // see every existing event. Otherwise a no-duration row sitting on an unloaded
+  // older page would chain into the visible window and the backend would reject
+  // the resulting Fill-gap insert as overlapping with that hidden event.
+  useAutoLoadAllPages({
+    hasNextPage: eventsQ.hasNextPage,
+    isFetchingNextPage: eventsQ.isFetchingNextPage,
+    fetchNextPage: eventsQ.fetchNextPage,
+    enabled: !!id
+  });
+
   const sof = sofQ.data as MotherSofDetail | undefined;
 
   const eventRows = useMemo(
@@ -185,6 +199,13 @@ export function MotherSofDetailView({
   const [evHoldReason, setEvHoldReason] = useState("");
   const [evErr, setEvErr] = useState<string | null>(null);
   const [addEventOpen, setAddEventOpen] = useState(false);
+  /**
+   * True while we're refetching the events list before opening the Fill-gap
+   * sheet. We block the Fill gap button during this window so the user can't
+   * trigger a second concurrent prepare and the eventual pre-fill always
+   * reflects the freshest server state.
+   */
+  const [fillGapPreparing, setFillGapPreparing] = useState(false);
 
   const profile = useUserProfile();
   const currentUser = useMemo<SofAddEventCurrentUser | null>(
@@ -204,18 +225,68 @@ export function MotherSofDetailView({
     return () => window.removeEventListener(VESSEL_SOF_CLEAR_SELECTION_EVENT, onWorkspaceClear);
   }, []);
 
-  const openAddEvent = (prefill?: { startIso?: string | null; endIso?: string | null }) => {
+  const openAddEvent = async (prefill?: {
+    startIso?: string | null;
+    endIso?: string | null;
+  }) => {
     setEvErr(null);
     setEvHoldReason("");
-    if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
-    if (prefill?.startIso !== undefined) {
-      setEvStartTime(prefill.startIso ? toLocalDtInput(prefill.startIso) : "");
-    } else {
-      // Default the new event's start to the most recent event's end so the user
-      // sees the natural chain point and can still adjust it before saving.
-      const lastEnd = latestEventMetrics?.eventTime ?? null;
-      setEvStartTime(lastEnd ? toLocalDtInput(lastEnd) : "");
+
+    // Plain "Add event": no fill-gap range to verify; chain off the most
+    // recent event's end so the saved row sits next to existing data.
+    if (!prefill || !prefill.startIso || !prefill.endIso) {
+      if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
+      if (prefill?.startIso !== undefined) {
+        setEvStartTime(prefill.startIso ? toLocalDtInput(prefill.startIso) : "");
+      } else {
+        const lastEnd = latestEventMetrics?.eventTime ?? null;
+        setEvStartTime(lastEnd ? toLocalDtInput(lastEnd) : "");
+      }
+      setAddEventOpen(true);
+      return;
     }
+
+    // "Fill gap" click: await a fresh refetch of the events list, then
+    // recompute the gap against that fresh data and use its bounds as the
+    // pre-fill. This is what prevents the "everytime" overlap error the user
+    // reported — the gap row displayed in the table might be derived from a
+    // stale cache (another tab/window added an event, or auto-load is still
+    // running), and saving the cached gap as-is would collide with the
+    // hidden event. By resolving the gap from the freshest snapshot we
+    // guarantee the saved event lands cleanly inside an actual gap.
+    setFillGapPreparing(true);
+    try {
+      await qc.refetchQueries({
+        queryKey: ["mother-sof-events", id],
+        exact: true,
+        type: "active"
+      });
+    } catch {
+      // Swallow the refetch error: we still try to honor the click using
+      // whatever data is currently in cache rather than blocking the user.
+    } finally {
+      setFillGapPreparing(false);
+    }
+
+    const fresh = qc.getQueryData<SofEventInfinitePages>(["mother-sof-events", id]);
+    const flatFresh = flatSofEventInfinitePages(fresh);
+    const freshAsc = sortSofEventsChronoAsc(flatFresh);
+    const matchingGap = resolveFreshSofGapForClick(
+      freshAsc,
+      prefill.startIso,
+      prefill.endIso
+    );
+
+    if (!matchingGap) {
+      toast.info(
+        "That gap was already filled or no longer overlaps an empty period — the timeline has been refreshed.",
+        { title: "Gap is up to date" }
+      );
+      return;
+    }
+
+    setEvTime(toLocalDtInput(matchingGap.toIso));
+    setEvStartTime(toLocalDtInput(matchingGap.fromIso));
     setAddEventOpen(true);
   };
 
@@ -255,7 +326,18 @@ export function MotherSofDetailView({
       qc.invalidateQueries({ queryKey: ["mother-sof-events", id] });
       qc.invalidateQueries({ queryKey: ["mother-sof", id] });
     },
-    onError: (e) => setEvErr(parseApiErr(e))
+    onError: (e) => {
+      const msg = parseApiErr(e);
+      setEvErr(msg);
+      // When the backend rejects with an overlap error the cached events
+      // list is almost certainly stale (an event was created somewhere we
+      // didn't see). Force a refresh so the conflicting row immediately
+      // appears in the table and the user can adjust their times against
+      // reality rather than against a phantom gap.
+      if (/overlap/i.test(msg)) {
+        void qc.invalidateQueries({ queryKey: ["mother-sof-events", id] });
+      }
+    }
   });
 
   const addEventFields = useMemo<SofAddEventFields>(
@@ -397,7 +479,9 @@ export function MotherSofDetailView({
         />
       }
       addEventDisabled={sof.status === "CLOSED"}
-      onAddEvent={(prefill) => openAddEvent(prefill)}
+      onAddEvent={(prefill) => {
+        void openAddEvent(prefill);
+      }}
       events={eventRows as SofEventListItem[]}
       eventTypeOptions={eventTypesQ.data ?? []}
       readOnly={sof.status === "CLOSED"}
@@ -411,6 +495,7 @@ export function MotherSofDetailView({
         isFetchingNextPage: eventsQ.isFetchingNextPage,
         fetchNextPage: () => eventsQ.fetchNextPage()
       }}
+      fillGapPreparing={fillGapPreparing}
     />
   );
 

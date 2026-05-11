@@ -15,6 +15,7 @@ import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-ta
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
 import { useUserProfile } from "@/components/providers/auth-provider";
+import { useAutoLoadAllPages } from "@/hooks/use-auto-load-all-pages";
 import {
   ImportContractLaytimeForm,
   VesselCallImportContractLinkPanel
@@ -38,6 +39,8 @@ import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
 import {
   flatSofEventInfinitePages,
   latestSofEventMetrics,
+  resolveFreshSofGapForClick,
+  sortSofEventsChronoAsc,
   toDatetimeLocalValue as toLocalDtInput,
   type SofEventInfinitePages
 } from "@/lib/sof-event-display";
@@ -127,6 +130,17 @@ export function LighterSofDetailView({
     getNextPageParam: (last: Paginated<SofEventListItem>) => last.nextCursor ?? undefined
   });
 
+  // Eagerly fetch the whole timeline so gap detection and the "Fill gap" pre-fill
+  // see every existing event. Otherwise a no-duration row sitting on an unloaded
+  // older page would chain into the visible window and the backend would reject
+  // the resulting Fill-gap insert as overlapping with that hidden event.
+  useAutoLoadAllPages({
+    hasNextPage: eventsQ.hasNextPage,
+    isFetchingNextPage: eventsQ.isFetchingNextPage,
+    fetchNextPage: eventsQ.fetchNextPage,
+    enabled: !!id
+  });
+
   const sof = sofQ.data as LighterSofDetail | undefined;
 
   const eventRows = useMemo(
@@ -190,6 +204,12 @@ export function LighterSofDetailView({
   const [evHoldReason, setEvHoldReason] = useState("");
   const [evErr, setEvErr] = useState<string | null>(null);
   const [addEventOpen, setAddEventOpen] = useState(false);
+  /**
+   * True while we're refetching the events list before opening the Fill-gap
+   * sheet. The Fill gap button is disabled during this window so the
+   * eventual pre-fill always matches the freshest server state.
+   */
+  const [fillGapPreparing, setFillGapPreparing] = useState(false);
 
   const profile = useUserProfile();
   const currentUser = useMemo<SofAddEventCurrentUser | null>(
@@ -209,18 +229,64 @@ export function LighterSofDetailView({
     return () => window.removeEventListener(VESSEL_SOF_CLEAR_SELECTION_EVENT, onWorkspaceClear);
   }, []);
 
-  const openAddEvent = (prefill?: { startIso?: string | null; endIso?: string | null }) => {
+  const openAddEvent = async (prefill?: {
+    startIso?: string | null;
+    endIso?: string | null;
+  }) => {
     setEvErr(null);
     setEvHoldReason("");
-    if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
-    if (prefill?.startIso !== undefined) {
-      setEvStartTime(prefill.startIso ? toLocalDtInput(prefill.startIso) : "");
-    } else {
-      // Default the new event's start to the most recent event's end so the user
-      // sees the natural chain point and can still adjust it before saving.
-      const lastEnd = latestEventMetrics?.eventTime ?? null;
-      setEvStartTime(lastEnd ? toLocalDtInput(lastEnd) : "");
+
+    if (!prefill || !prefill.startIso || !prefill.endIso) {
+      if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
+      if (prefill?.startIso !== undefined) {
+        setEvStartTime(prefill.startIso ? toLocalDtInput(prefill.startIso) : "");
+      } else {
+        const lastEnd = latestEventMetrics?.eventTime ?? null;
+        setEvStartTime(lastEnd ? toLocalDtInput(lastEnd) : "");
+      }
+      setAddEventOpen(true);
+      return;
     }
+
+    // "Fill gap" click: refetch the events list and recompute the gap from
+    // the freshest data before opening the sheet. The gap row displayed in
+    // the table can be derived from a stale cache when an event was added
+    // elsewhere, so saving the cached gap bounds verbatim would collide
+    // with the hidden event on the backend. See `resolveFreshSofGapForClick`
+    // for the matching logic.
+    setFillGapPreparing(true);
+    try {
+      await qc.refetchQueries({
+        queryKey: ["lighter-sof-events", id],
+        exact: true,
+        type: "active"
+      });
+    } catch {
+      // Best-effort refetch — fall through and try to resolve a gap from
+      // whatever data is already in the cache instead of blocking the user.
+    } finally {
+      setFillGapPreparing(false);
+    }
+
+    const fresh = qc.getQueryData<SofEventInfinitePages>(["lighter-sof-events", id]);
+    const flatFresh = flatSofEventInfinitePages(fresh);
+    const freshAsc = sortSofEventsChronoAsc(flatFresh);
+    const matchingGap = resolveFreshSofGapForClick(
+      freshAsc,
+      prefill.startIso,
+      prefill.endIso
+    );
+
+    if (!matchingGap) {
+      toast.info(
+        "That gap was already filled or no longer overlaps an empty period — the timeline has been refreshed.",
+        { title: "Gap is up to date" }
+      );
+      return;
+    }
+
+    setEvTime(toLocalDtInput(matchingGap.toIso));
+    setEvStartTime(toLocalDtInput(matchingGap.fromIso));
     setAddEventOpen(true);
   };
 
@@ -293,7 +359,16 @@ export function LighterSofDetailView({
       qc.invalidateQueries({ queryKey: ["lighter-sof-events", id] });
       qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
     },
-    onError: (e) => setEvErr(parseApiErr(e))
+    onError: (e) => {
+      const msg = parseApiErr(e);
+      setEvErr(msg);
+      // Overlap errors typically indicate that the cached events list is
+      // stale; refresh it so the user can see the conflicting event in the
+      // table without having to manually reload.
+      if (/overlap/i.test(msg)) {
+        void qc.invalidateQueries({ queryKey: ["lighter-sof-events", id] });
+      }
+    }
   });
 
   const addEventFields = useMemo<SofAddEventFields>(
@@ -486,7 +561,9 @@ export function LighterSofDetailView({
               />
             }
             addEventDisabled={sof.status === "CLOSED"}
-            onAddEvent={(prefill) => openAddEvent(prefill)}
+            onAddEvent={(prefill) => {
+              void openAddEvent(prefill);
+            }}
             events={eventRows as SofEventListItem[]}
             eventTypeOptions={eventTypesQ.data ?? []}
             readOnly={sof.status === "CLOSED"}
@@ -500,6 +577,7 @@ export function LighterSofDetailView({
               isFetchingNextPage: eventsQ.isFetchingNextPage,
               fetchNextPage: () => eventsQ.fetchNextPage()
             }}
+            fillGapPreparing={fillGapPreparing}
           />
         </TabsContent>
 

@@ -76,7 +76,7 @@ export class SofService {
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       select: this.sofRepository.getMotherVesselSofListSelect()
     });
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
 
     return {
       data: rows.slice(0, limit),
@@ -202,7 +202,7 @@ export class SofService {
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       select: this.sofRepository.getLighterVesselSofListSelect()
     });
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
 
     return {
       data: rows.slice(0, limit),
@@ -279,7 +279,12 @@ export class SofService {
 
     const limit = parseLimit(query.limit, DEFAULT_SOF_PAGE_SIZE);
     const rows = await this.sofRepository.listSofEvents(statementId, limit, query.cursor);
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    // Cursor pagination: the repository fetches `limit + 1` rows so we can detect
+    // a next page. The `nextCursor` MUST be the id of the LAST RETURNED row
+    // (rows[limit - 1]), not rows[limit]. The repository combines the cursor
+    // with `skip: 1`, so the next page starts from the row AFTER the cursor.
+    // Using rows[limit] would silently drop one row at every page boundary.
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
 
     return {
       data: rows.slice(0, limit),
@@ -435,7 +440,9 @@ export class SofService {
         id: r.id,
         eventTime: r.eventTime,
         durationHours: r.durationHours,
-        durationMinutes: r.durationMinutes
+        durationMinutes: r.durationMinutes,
+        remarks: r.remarks,
+        eventTypeDefinition: r.eventTypeDefinition
       })),
       // `id: null` flags this as the prospective new row; the validator's
       // tie-breaker sorts it after existing rows that share `eventTime`.
@@ -443,7 +450,9 @@ export class SofService {
         id: null,
         eventTime,
         durationHours: outHours ?? null,
-        durationMinutes: outMinutes
+        durationMinutes: outMinutes,
+        remarks: dto.remarks ?? null,
+        eventTypeDefinition: { name: eventTypeDef.name }
       }
     ]);
 
@@ -544,16 +553,23 @@ export class SofService {
       timeline.map((r) =>
         r.id === eventId
           ? {
-              id: r.id,
+              // `id: null` flags this as the prospective edited row so the
+              // overlap error can name *other* events as the conflict instead
+              // of citing the row the user is currently editing.
+              id: null,
               eventTime: nextEventTime,
               durationHours: nextHours,
-              durationMinutes: nextMinutes
+              durationMinutes: nextMinutes,
+              remarks: dto.remarks ?? r.remarks,
+              eventTypeDefinition: r.eventTypeDefinition
             }
           : {
               id: r.id,
               eventTime: r.eventTime,
               durationHours: r.durationHours,
-              durationMinutes: r.durationMinutes
+              durationMinutes: r.durationMinutes,
+              remarks: r.remarks,
+              eventTypeDefinition: r.eventTypeDefinition
             }
       )
     );

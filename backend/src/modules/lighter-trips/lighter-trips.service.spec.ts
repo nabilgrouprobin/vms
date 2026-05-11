@@ -286,7 +286,12 @@ describe("LighterTripsService.list", () => {
 
     const page = await service.list({ limit: "20" });
     assert.equal(page.data.length, 20);
-    assert.equal(page.nextCursor, "id-20");
+    // nextCursor must be the id of the LAST RETURNED row, not the probe row.
+    // The repository fetches `limit + 1` and uses Prisma's `cursor + skip: 1`
+    // for the next page, so the cursor row is itself skipped. If we used the
+    // probe row (rows[limit]) as the cursor, one row would be silently
+    // dropped at every page boundary.
+    assert.equal(page.nextCursor, "id-19");
     assert.equal(page.limit, 20);
   });
 });

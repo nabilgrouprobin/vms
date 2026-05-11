@@ -251,10 +251,11 @@ export class SofRepository {
   findActiveSofEventTypeDefinition(id: string) {
     return this.prisma.sofEventTypeDefinition.findFirst({
       where: { id, deletedAt: null, isActive: true },
-      select: { id: true, scope: true, category: true }
+      select: { id: true, name: true, scope: true, category: true }
     }) as Promise<
       | {
           id: string;
+          name: string;
           scope: import("@prisma/client").SofEventTypeScope;
           category: "NORMAL" | "HOLD_DELAY";
         }
@@ -272,12 +273,23 @@ export class SofRepository {
     });
   }
 
-  /** All events for a statement, ordered for contiguous-timeline validation. */
+  /**
+   * All events for a statement, ordered for contiguous-timeline validation.
+   * `remarks` and `eventTypeDefinition.name` are included so overlap errors
+   * can name the conflicting events instead of just citing time ranges.
+   */
   listSofEventsTimelineForValidation(statementId: string) {
     return this.prisma.sofEvent.findMany({
       where: { statementId },
       orderBy: [{ eventTime: "asc" }, { id: "asc" }],
-      select: { id: true, eventTime: true, durationHours: true, durationMinutes: true }
+      select: {
+        id: true,
+        eventTime: true,
+        durationHours: true,
+        durationMinutes: true,
+        remarks: true,
+        eventTypeDefinition: { select: { name: true } }
+      }
     });
   }
 

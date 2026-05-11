@@ -128,7 +128,7 @@ export class MasterVesselsService {
       }
     });
 
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
     const slice = rows.slice(0, limit) as unknown as VesselListRow[];
     return {
       data: slice.map((r) => this.mapVessel(kind, r)),

@@ -53,6 +53,10 @@ export type SofTimelineValidationRow = {
   eventTime: Date;
   durationHours: Prisma.Decimal | null | undefined;
   durationMinutes?: number | null;
+  /** Optional display label so overlap errors can name the conflicting event. */
+  remarks?: string | null;
+  /** Optional event type display name (e.g. "BAD WEATHER ISSUE"). */
+  eventTypeDefinition?: { name: string } | null;
 };
 
 const MS_PER_HOUR = 3_600_000;
@@ -157,8 +161,41 @@ export function findTimelineSplitHost(
   return matches[0]!;
 }
 
+/** Format an instant using the local server zone in the form `YYYY-MM-DD HH:mm`. */
+function formatTimelineInstant(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
+/** Format a window as `YYYY-MM-DD HH:mm → YYYY-MM-DD HH:mm`. */
+function formatTimelineWindow(startMs: number, endMs: number): string {
+  return `${formatTimelineInstant(startMs)} → ${formatTimelineInstant(endMs)}`;
+}
+
+/** Build a short label for a conflicting row: type name + truncated remarks. */
+function describeConflictRow(row: SofTimelineValidationRow): string {
+  const parts: string[] = [];
+  const typeName = row.eventTypeDefinition?.name?.trim();
+  if (typeName) parts.push(typeName);
+  const remarks = row.remarks?.trim();
+  if (remarks) {
+    const oneLine = remarks.replace(/\s+/g, " ");
+    parts.push(`"${oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine}"`);
+  }
+  return parts.length > 0 ? parts.join(" — ") : "(no remarks)";
+}
+
 /**
  * Block intersecting effective periods (explicit duration or chained), sorted by start.
+ *
+ * On conflict, the thrown `BadRequestException` includes the *new* event's
+ * intended window and *every* existing event it collides with (with type and
+ * remarks), so the user can quickly see what to adjust instead of scanning
+ * the timeline by hand.
  */
 export function validateSofEventTimelineNoOverlap(rows: SofTimelineValidationRow[]): void {
   if (rows.length <= 1) {
@@ -169,24 +206,66 @@ export function validateSofEventTimelineNoOverlap(rows: SofTimelineValidationRow
     (a, b) => a.eventTime.getTime() - b.eventTime.getTime() || compareTimelineId(a.id, b.id)
   );
 
-  type Window = { id: string | null; startMs: number; endMs: number };
+  type Window = { row: SofTimelineValidationRow; startMs: number; endMs: number };
   const windows: Window[] = [];
   let prevRowEndMs: number | null = null;
   for (const r of sorted) {
     const b = effectiveSofPeriodBoundsMs(r, prevRowEndMs);
     prevRowEndMs = r.eventTime.getTime();
     if (!b || b.endMs <= b.startMs) continue;
-    windows.push({ id: r.id, startMs: b.startMs, endMs: b.endMs });
+    windows.push({ row: r, startMs: b.startMs, endMs: b.endMs });
   }
 
-  windows.sort((a, b) => a.startMs - b.startMs || compareTimelineId(a.id, b.id));
+  windows.sort(
+    (a, b) => a.startMs - b.startMs || compareTimelineId(a.row.id, b.row.id)
+  );
 
+  // First locate the prospective new row's effective window. If the caller
+  // didn't tag any row with id=null we still report a conflict using the
+  // first detected pair (existing-vs-existing inconsistency).
+  const newWindow = windows.find((w) => w.row.id === null);
+
+  if (newWindow) {
+    const conflicts = windows.filter((w) => {
+      if (w === newWindow) return false;
+      const overlapStart = Math.max(w.startMs, newWindow.startMs);
+      const overlapEnd = Math.min(w.endMs, newWindow.endMs);
+      return overlapEnd - overlapStart > SOF_TIMELINE_TOLERANCE_MS;
+    });
+    if (conflicts.length === 0) return;
+
+    const newRange = formatTimelineWindow(newWindow.startMs, newWindow.endMs);
+    const lines = conflicts.map((c) => {
+      const overlapStart = Math.max(c.startMs, newWindow.startMs);
+      const overlapEnd = Math.min(c.endMs, newWindow.endMs);
+      const overlapMinutes = Math.max(0, Math.round((overlapEnd - overlapStart) / 60_000));
+      return (
+        `  - ${formatTimelineWindow(c.startMs, c.endMs)} (${overlapMinutes} min overlap) — ` +
+        describeConflictRow(c.row)
+      );
+    });
+    throw new BadRequestException(
+      `SOF events cannot overlap. The event you are saving covers ${newRange} ` +
+        `and conflicts with ${conflicts.length} existing event(s):\n${lines.join("\n")}\n` +
+        "Adjust the start/end times so the periods do not intersect, or delete/edit the existing event(s) first."
+    );
+  }
+
+  // Fallback: no prospective row was tagged. Report the first existing pair
+  // that intersects so we never silently accept an inconsistent timeline.
   for (let i = 1; i < windows.length; i++) {
     const prev = windows[i - 1];
     const curr = windows[i];
     if (prev.endMs - curr.startMs > SOF_TIMELINE_TOLERANCE_MS) {
+      const overlapStart = Math.max(prev.startMs, curr.startMs);
+      const overlapEnd = Math.min(prev.endMs, curr.endMs);
+      const overlapMinutes = Math.max(0, Math.round((overlapEnd - overlapStart) / 60_000));
       throw new BadRequestException(
-        "SOF events cannot overlap: the event you are saving covers time that is already used by another event with a duration. Adjust the start/end times so the periods do not intersect."
+        `SOF events cannot overlap. ${formatTimelineWindow(curr.startMs, curr.endMs)} ` +
+          `(${describeConflictRow(curr.row)}) intersects ` +
+          `${formatTimelineWindow(prev.startMs, prev.endMs)} ` +
+          `(${describeConflictRow(prev.row)}) by ${overlapMinutes} min. ` +
+          "Adjust the start/end times so the periods do not intersect, or delete/edit one of the events."
       );
     }
   }

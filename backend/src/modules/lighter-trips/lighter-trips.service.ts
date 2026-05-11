@@ -200,7 +200,7 @@ export class LighterTripsService {
       } as unknown as Prisma.LighterTripSelect
     });
 
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
 
     return {
       data: rows.slice(0, limit),
@@ -305,7 +305,7 @@ export class LighterTripsService {
       }
     });
 
-    const nextCursor = rows.length > limit ? rows[limit].id : null;
+    const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
 
     return {
       data: rows.slice(0, limit),

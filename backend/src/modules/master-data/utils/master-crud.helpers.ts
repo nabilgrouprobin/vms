@@ -96,7 +96,7 @@ export async function listMasterPaginated<TRow, TSelect, TWhere>(
     select
   })) as Array<TRow & { id: string }>;
 
-  const nextCursor = rows.length > limit ? rows[limit].id : null;
+  const nextCursor = rows.length > limit ? rows[limit - 1].id : null;
   const sliced = rows.slice(0, limit);
   return {
     data: mapRow ? sliced.map((r) => mapRow(r)) : sliced,
