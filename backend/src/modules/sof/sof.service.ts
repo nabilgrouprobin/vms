@@ -325,6 +325,9 @@ export class SofService {
 
     // Hold/Delay is now driven by the master event type's `category`.
     const derivedIsHold = eventTypeDef.category === "HOLD_DELAY";
+    /** Laytime engine uses this flag; align with category when the client omits it (matches seed + docs). */
+    const derivedCountsAsLaytime =
+      dto.countsAsLaytime ?? eventTypeDef.category !== "HOLD_DELAY";
 
     const baseInsert = this.removeUndefined({
       statementId,
@@ -332,7 +335,7 @@ export class SofService {
       eventTime,
       durationHours: outHours,
       durationMinutes: outMinutes,
-      countsAsLaytime: dto.countsAsLaytime ?? true,
+      countsAsLaytime: derivedCountsAsLaytime,
       laytimeImpactHours: this.toDecimal(dto.laytimeImpactHours),
       location: dto.location,
       anchorageId: dto.anchorageId,
@@ -574,6 +577,13 @@ export class SofService {
       )
     );
 
+    const countsAsLaytimePatch =
+      dto.countsAsLaytime !== undefined
+        ? dto.countsAsLaytime
+        : dto.eventTypeId !== undefined && nextEventTypeCategory !== undefined
+          ? nextEventTypeCategory !== "HOLD_DELAY"
+          : undefined;
+
     return this.sofRepository.updateSofEvent(
       eventId,
       this.removeUndefined({
@@ -582,7 +592,7 @@ export class SofService {
         ...(dto.durationMinutes !== undefined || dto.durationHours !== undefined
           ? { durationHours: nextHours, durationMinutes: nextMinutes }
           : {}),
-        countsAsLaytime: dto.countsAsLaytime,
+        countsAsLaytime: countsAsLaytimePatch,
         laytimeImpactHours: this.toNullableDecimal(dto.laytimeImpactHours),
         location: dto.location,
         anchorageId: dto.anchorageId,

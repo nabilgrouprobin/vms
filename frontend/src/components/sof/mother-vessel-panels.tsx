@@ -1,8 +1,26 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import {
+  Anchor,
+  CalendarClock,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Clock,
+  FileText,
+  Flag,
+  Gauge,
+  Globe2,
+  MapPin,
+  Package,
+  Ruler,
+  Ship,
+  Sigma,
+  Timer
+} from "lucide-react";
 import Link from "next/link";
 
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SofDetailGrid } from "@/components/sof/sof-detail-grid";
@@ -10,6 +28,127 @@ import { formatDt, formatNum } from "@/lib/format";
 import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
 import { approxOutstandingMt, hoursRelativeToNow } from "@/lib/sof-display-utils";
 import { DEFAULT_LAYTIME_IANA_ZONE, formatGmtOffsetForZone } from "@/lib/timezone-gmt";
+import { cn } from "@/lib/utils";
+
+function statusBadgeVariant(
+  status: string
+): "default" | "secondary" | "outline" | "success" | "warning" {
+  if (status === "COMPLETED" || status === "CLOSED") return "success";
+  if (status === "DISCHARGING" || status === "PARTIAL_DISCHARGED") return "default";
+  if (status === "LC_HOLD" || status === "CANCELLED") return "warning";
+  if (status === "EXPECTED") return "outline";
+  return "secondary";
+}
+
+function parseNumOrNull(v: string | null | undefined): number | null {
+  if (v == null || v === "") return null;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function dischargeProgressPct(
+  approxTotal: string | null | undefined,
+  discharged: string | null | undefined
+): number | null {
+  const a = parseNumOrNull(approxTotal);
+  const d = parseNumOrNull(discharged);
+  if (a == null || a <= 0 || d == null) return null;
+  return Math.max(0, Math.min(100, (d / a) * 100));
+}
+
+type Milestone = { label: string; iso: string | null; tone?: "primary" | "muted" };
+
+function Stat({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  className
+}: {
+  icon: typeof Anchor;
+  label: string;
+  value: React.ReactNode;
+  hint?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-border bg-card px-3 py-2.5 shadow-sm transition-colors",
+        className
+      )}
+    >
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <Icon className="size-3.5" />
+        <span>{label}</span>
+      </div>
+      <div className="mt-1 text-sm font-semibold leading-snug break-words">{value}</div>
+      {hint ? (
+        <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground break-words">
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProgressBar({ pct }: { pct: number }) {
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-full rounded-full bg-primary transition-[width] duration-500"
+        style={{ width: `${pct.toFixed(1)}%` }}
+      />
+    </div>
+  );
+}
+
+function MilestoneStrip({ steps }: { steps: Milestone[] }) {
+  return (
+    <ol className="relative grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      {steps.map((s, i) => {
+        const done = !!s.iso;
+        const Icon = done ? CheckCircle2 : Circle;
+        return (
+          <li
+            key={`${s.label}-${i}`}
+            className={cn(
+              "flex items-start gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors",
+              done
+                ? "border-primary/30 bg-primary/5"
+                : "border-dashed border-border bg-muted/20 text-muted-foreground"
+            )}
+          >
+            <Icon
+              className={cn(
+                "mt-0.5 size-3.5 shrink-0",
+                done ? "text-primary" : "text-muted-foreground/60"
+              )}
+            />
+            <div className="min-w-0 flex-1">
+              <p
+                className={cn(
+                  "truncate text-[10px] font-medium uppercase tracking-wide",
+                  done ? "text-foreground/80" : "text-muted-foreground"
+                )}
+              >
+                {s.label}
+              </p>
+              <p
+                className={cn(
+                  "mt-0.5 font-mono text-[11px] leading-snug",
+                  done ? "text-foreground" : "text-muted-foreground/70"
+                )}
+              >
+                {formatDt(s.iso)}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 /** Matches `vesselCall` on mother SOF detail API after expanded select */
 export type MotherVesselCallDetail = {
@@ -103,87 +242,251 @@ export function MotherVesselOverviewPanel({
   const ic = vesselCall.importContract;
   const layTzIana = vesselCall.laytimeTimeZone?.trim() || DEFAULT_LAYTIME_IANA_ZONE;
   const layTzGmt = formatGmtOffsetForZone(layTzIana);
-  const layTzDisplay =
-    layTzGmt && vesselCall.laytimeTimeZone?.trim()
-      ? `${layTzIana} · ${layTzGmt}`
-      : layTzGmt
-        ? `${layTzIana} (default) · ${layTzGmt}`
-        : `${layTzIana}${vesselCall.laytimeTimeZone?.trim() ? "" : " (default)"}`;
+  const layTzIsDefault = !vesselCall.laytimeTimeZone?.trim();
+  const dischargedPct = dischargeProgressPct(
+    vesselCall.approxTotalWeightTon,
+    vesselCall.totalDischargeMt
+  );
+  const outstanding = approxOutstandingMt(
+    vesselCall.approxTotalWeightTon,
+    vesselCall.totalDischargeMt
+  );
+  const tolerance =
+    vesselCall.toleranceMinusPct || vesselCall.tolerancePlusPct
+      ? `± ${formatNum(vesselCall.tolerancePlusPct)} / ${formatNum(vesselCall.toleranceMinusPct)} %`
+      : null;
+
+  const milestones: Milestone[] = [
+    { label: "ETA", iso: vesselCall.eta },
+    { label: "ATA", iso: vesselCall.ata },
+    { label: "Anchor dropped", iso: vesselCall.anchorDroppedAt },
+    { label: "NOR tendered", iso: vesselCall.norTenderedAt },
+    { label: "NOR accepted", iso: vesselCall.norAcceptedAt },
+    { label: "Ready to discharge", iso: vesselCall.readyToDischargeAt },
+    { label: "Discharge started", iso: vesselCall.dischargeStartedAt },
+    { label: "Discharge completed", iso: vesselCall.dischargeCompletedAt },
+    { label: "Anchor up", iso: vesselCall.anchorUpAt },
+    { label: "ATD", iso: vesselCall.atd }
+  ];
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Vessel &amp; call details</CardTitle>
-        <CardDescription className="text-xs">
-          Call {vesselCall.callNo} · {v.name} — expand for full database fields.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-          <dl className="grid gap-x-3 gap-y-2 text-xs sm:grid-cols-2 md:grid-cols-3">
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Status</dt>
-              <dd className="font-semibold">{vesselCall.status}</dd>
+    <Card className="overflow-hidden">
+      <div className="border-b border-border bg-gradient-to-r from-primary/10 via-card to-card px-5 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <Ship className="size-5" />
             </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Cargo</dt>
-              <dd className="font-medium break-words">{formatNum(vesselCall.cargoNameSnapshot)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Location
-              </dt>
-              <dd className="font-medium">{loc ? `${loc.name}` : "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Approx total / discharged
-              </dt>
-              <dd className="font-medium">
-                {formatNum(vesselCall.approxTotalWeightTon)} /{" "}
-                {formatNum(vesselCall.totalDischargeMt)} MT
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Outstanding
-              </dt>
-              <dd className="font-medium">
-                {approxOutstandingMt(vesselCall.approxTotalWeightTon, vesselCall.totalDischargeMt)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                ETA · ETD
-              </dt>
-              <dd className="font-medium">
-                {formatDt(vesselCall.eta)} · {formatDt(vesselCall.etd)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Laytime zone
-              </dt>
-              <dd className="font-medium font-mono text-xs">{layTzDisplay}</dd>
-            </div>
-            {ic ? (
-              <div className="sm:col-span-2 md:col-span-3">
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Contract laytime
-                </dt>
-                <dd className="mt-1 flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    Excluded days: {(ic.excludedDays ?? []).join(", ") || "—"}
-                  </span>
-                  <Link
-                    href={`/import-contracts/${ic.id}`}
-                    className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-                  >
-                    Edit contract terms
-                  </Link>
-                </dd>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-lg font-semibold tracking-tight">{v.name}</h2>
+                <Badge variant={statusBadgeVariant(vesselCall.status)}>{vesselCall.status}</Badge>
               </div>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                <span className="font-mono text-foreground/80">{vesselCall.callNo}</span>
+                {v.imoNo ? <span> · IMO {v.imoNo}</span> : null}
+                {v.flag ? (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <span className="inline-flex items-center gap-1 align-middle">
+                      <Flag className="size-3" />
+                      {v.flag}
+                    </span>
+                  </>
+                ) : null}
+                {v.vesselType ? <span> · {v.vesselType}</span> : null}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            {vesselCall.cargoNameSnapshot ? (
+              <Badge variant="secondary" className="gap-1">
+                <Package className="size-3" />
+                {vesselCall.cargoNameSnapshot}
+              </Badge>
             ) : null}
+            {loc ? (
+              <Badge variant="outline" className="gap-1">
+                <MapPin className="size-3" />
+                {loc.name}
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <CardContent className="space-y-4 pt-4">
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat
+            icon={Package}
+            label="Approx total"
+            value={
+              <>
+                {formatNum(vesselCall.approxTotalWeightTon)}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">MT</span>
+              </>
+            }
+            hint={tolerance ?? undefined}
+          />
+          <Stat
+            icon={Sigma}
+            label="Discharged"
+            value={
+              <>
+                {formatNum(vesselCall.totalDischargeMt)}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">MT</span>
+              </>
+            }
+            hint={
+              dischargedPct != null ? (
+                <div className="mt-1 space-y-1">
+                  <ProgressBar pct={dischargedPct} />
+                  <p className="text-[10px] font-mono text-muted-foreground">
+                    {dischargedPct.toFixed(1)}% of approx total
+                  </p>
+                </div>
+              ) : (
+                "Set approx total to track progress"
+              )
+            }
+          />
+          <Stat
+            icon={Gauge}
+            label="Outstanding"
+            value={outstanding}
+            hint={
+              vesselCall.nextStageExpectedAt
+                ? `Next stage ${hoursRelativeToNow(vesselCall.nextStageExpectedAt)}`
+                : `${vesselCall.completedStages}/${vesselCall.totalStages} stages done`
+            }
+          />
+          <Stat
+            icon={Clock}
+            label="Laytime zone"
+            value={<span className="font-mono text-sm">{layTzIana}</span>}
+            hint={
+              <>
+                {layTzGmt ?? "—"}
+                {layTzIsDefault ? <span className="ml-1 text-muted-foreground">(default)</span> : null}
+              </>
+            }
+          />
+        </div>
+
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          <Stat
+            icon={CalendarClock}
+            label="ETA · ATA"
+            value={
+              <span className="space-x-1 text-sm">
+                <span>{formatDt(vesselCall.eta)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span>{formatDt(vesselCall.ata)}</span>
+              </span>
+            }
+            hint={
+              vesselCall.eta && !vesselCall.ata
+                ? `${hoursRelativeToNow(vesselCall.eta)}`
+                : undefined
+            }
+          />
+          <Stat
+            icon={Timer}
+            label="ETD · ATD"
+            value={
+              <span className="space-x-1 text-sm">
+                <span>{formatDt(vesselCall.etd)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span>{formatDt(vesselCall.atd)}</span>
+              </span>
+            }
+            hint={
+              vesselCall.etd && !vesselCall.atd
+                ? `${hoursRelativeToNow(vesselCall.etd)}`
+                : undefined
+            }
+          />
+          <Stat
+            icon={Anchor}
+            label="Berth status"
+            value={
+              <span className="space-x-1.5">
+                <Badge
+                  variant={vesselCall.isAnchored ? "default" : "outline"}
+                  className="text-[10px]"
+                >
+                  {vesselCall.isAnchored ? "Anchored" : "Not anchored"}
+                </Badge>
+                <Badge
+                  variant={vesselCall.isAlongside ? "default" : "outline"}
+                  className="text-[10px]"
+                >
+                  {vesselCall.isAlongside ? "Alongside" : "Off-berth"}
+                </Badge>
+              </span>
+            }
+            hint={vesselCall.currentAnchorage ? `At ${vesselCall.currentAnchorage}` : undefined}
+          />
+        </div>
+
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <Globe2 className="size-3.5" /> Voyage timeline
+          </p>
+          <MilestoneStrip steps={milestones} />
+        </div>
+
+        {ic ? (
+          <Link
+            href={`/import-contracts/${ic.id}`}
+            className="group flex items-center justify-between gap-3 rounded-md border border-primary/25 bg-primary/5 px-3 py-2.5 text-xs transition-colors hover:bg-primary/10"
+          >
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
+                <FileText className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-medium text-foreground">
+                  Contract {ic.contractNo}
+                  {ic.dischargePort ? (
+                    <span className="ml-1 text-muted-foreground">· {ic.dischargePort}</span>
+                  ) : null}
+                </p>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  Excluded days: {(ic.excludedDays ?? []).join(", ") || "—"}
+                  {ic.dischargeRateMtPerDay
+                    ? ` · ${ic.dischargeRateMtPerDay} ${ic.dischargeRateUnit ?? "MT/day"}`
+                    : ""}
+                </p>
+              </div>
+            </div>
+            <span className="shrink-0 text-[11px] font-medium text-primary group-hover:underline">
+              Edit terms →
+            </span>
+          </Link>
+        ) : null}
+
+        <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <Ruler className="size-3.5" /> Vessel specifications
+          </p>
+          <dl className="grid gap-x-3 gap-y-2 text-xs sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+            {[
+              { label: "Type", value: formatNum(v.vesselType) },
+              { label: "Year built", value: v.yearBuilt != null ? String(v.yearBuilt) : "—" },
+              { label: "DWT (MT)", value: formatNum(v.deadweightTon) },
+              { label: "LOA (m)", value: formatNum(v.lengthOverallM) },
+              { label: "Beam (m)", value: formatNum(v.beamM) },
+              { label: "Max draft (m)", value: formatNum(v.maxDraftMeters) }
+            ].map(({ label, value }) => (
+              <div key={label}>
+                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {label}
+                </dt>
+                <dd className="mt-0.5 font-medium">{value}</dd>
+              </div>
+            ))}
           </dl>
         </div>
 

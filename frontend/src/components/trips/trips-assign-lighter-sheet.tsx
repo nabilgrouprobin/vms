@@ -100,8 +100,7 @@ export function TripsAssignLighterSheet({
     onError: (e) => setError(parseApiErr(e))
   });
 
-  const assignments = assignmentsQ.data ?? [];
-  const effectiveAssignmentId = assignmentId ?? (assignments[0]?.id ?? null);
+  const assignments = useMemo(() => assignmentsQ.data ?? [], [assignmentsQ.data]);
 
   useEffect(() => {
     if (!open) return;

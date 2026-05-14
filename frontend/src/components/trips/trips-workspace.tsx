@@ -115,6 +115,7 @@ function TripsWorkspaceInner() {
       }),
       { scroll: false }
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
   }, [kind, vesselCallId, lighterCallId, legacyLighterHullId, pathname, router, searchParamsSnapshot]);
 
   /** Same pattern as vessel SOF `SelectedSofChip` — `Link` clears selection reliably under Suspense/Tabs. */
@@ -164,6 +165,7 @@ function TripsWorkspaceInner() {
       }),
       { scroll: false }
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
   }, [
     kind,
     lighterCallId,

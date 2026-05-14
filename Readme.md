@@ -134,6 +134,47 @@ This script:
 - starts/reloads `vms-backend` + `vms-frontend` from `ecosystem.config.cjs`,
 - prints health-check status.
 
+If the restart script reports **frontend port still busy**, another process is
+holding `3000` (often a root-owned listener). Install and reload under PM2
+with privileged port cleanup:
+
+```bash
+cd /var/www/vms
+./deploy/restart-stack.sh
+```
+
+This runs `sudo` once to kill listeners on `3000`/`4000`, then runs
+`scripts/pm2-restart-vms.sh` as your normal user.
+
+If **root** **`pm2-root.service`** is active, VMS runs under **`/root/.pm2`** and
+your user’s `pm2 list` stays empty while **3000** stays taken. Run once:
+
+```bash
+sudo bash /var/www/vms/deploy/migrate-pm2-root-to-ngi.sh
+```
+
+After that, manage the stack only as your normal user (`pm2`, `./scripts/pm2-restart-vms.sh`).
+
+### Public access over the Internet
+
+The app listens on **`0.0.0.0:3000`** (Next.js) and **`0.0.0.0:4000`** (API).
+Typically you expose only **TCP 80 / 443** on the VPS and reverse-proxy to localhost.
+
+- Example nginx site (replace `__SERVER_NAME__` with your **domain or public IP**):
+  [`deploy/nginx-vms.site.conf`](deploy/nginx-vms.site.conf) — copy into
+  `/etc/nginx/sites-available/`, symlink `sites-enabled`, then
+  `sudo nginx -t && sudo systemctl reload nginx`. Prefer **one** `location /`
+  proxy to port `3000` only; Next proxies `/api` to Nest internally. A separate
+  nginx `location /api/` straight to `:4000` causes **502** if the API process is down while the SPA still loads.
+- **TLS**: after DNS points to this server:
+  `sudo certbot certonly --nginx -d example.com` (or `certbot --nginx` to patch the server block).
+
+Keep `BACKEND_INTERNAL_URL=http://127.0.0.1:4000` in `frontend/.env`; the browser
+calls `/api`, which nginx (or Next rewrites) forwards to Nest. Optionally set `CORS_ORIGINS`
+to your public `https://` URL instead of `*`.
+
+Ensure the cloud firewall / `ufw` allows **HTTP/HTTPS** to this host.
+
 ## Notes for New Server
 
 - If PostgreSQL is on the same server, `localhost` in `DATABASE_URL` is correct.

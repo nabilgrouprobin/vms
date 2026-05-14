@@ -497,8 +497,7 @@ export async function exportSofEventTypesCsv(params: {
   downloadCsvFile(`sof-event-types-${isoDateSlug()}.csv`, stringifyCsv(headers, rows));
 }
 
-const SOF_EVENT_TYPE_CATEGORY_VALUES = ["NORMAL", "HOLD_DELAY"] as const;
-type SofEventTypeCategoryCsv = (typeof SOF_EVENT_TYPE_CATEGORY_VALUES)[number];
+type SofEventTypeCategoryCsv = "NORMAL" | "HOLD_DELAY";
 
 function normalizeSofEventTypeCategory(raw: string | undefined): SofEventTypeCategoryCsv | null {
   const v = (raw ?? "").trim().toUpperCase();

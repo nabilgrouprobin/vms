@@ -1,18 +1,43 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import {
+  Anchor,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Flag,
+  PackageOpen,
+  Route,
+  Ruler,
+  Ship,
+  Waves
+} from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SofDetailGrid } from "@/components/sof/sof-detail-grid";
 import { formatDt, formatNum } from "@/lib/format";
 import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
+import { cn } from "@/lib/utils";
 
 import {
   MotherVesselOverviewPanel,
   type LatestSofEventMetrics,
   type MotherVesselCallDetail
 } from "./mother-vessel-panels";
+
+function lighterTripStatusVariant(
+  status: string
+): "default" | "secondary" | "outline" | "success" | "warning" {
+  if (status === "UNLOADED" || status === "CLOSED") return "success";
+  if (status === "ON_HOLD" || status === "CANCELLED" || status === "NOT_READY") return "warning";
+  if (status === "LOADING" || status === "UNLOADING" || status === "PARTIAL_UNLOADED") {
+    return "default";
+  }
+  if (status === "PLANNED" || status === "ASSIGNED") return "outline";
+  return "secondary";
+}
 
 /** Matches `lighterTrip` on lighter SOF detail API include */
 export type LighterTripDetail = {
@@ -50,40 +75,60 @@ function LighterVesselRegistryPanel({
 }) {
   const v = lighterVessel;
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Lighter vessel (registry)</CardTitle>
-        <CardDescription className="text-xs">
-          {v.name} — same registry coverage as the mother vessel block on a mother SOF.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-          <dl className="grid gap-x-3 gap-y-2 text-xs sm:grid-cols-2 md:grid-cols-3">
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Name</dt>
-              <dd className="font-semibold">{v.name}</dd>
+    <Card className="overflow-hidden">
+      <div className="border-b border-border bg-gradient-to-r from-sky-500/10 via-card to-card px-5 py-4">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
+            <Waves className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate text-base font-semibold tracking-tight">{v.name}</h3>
+              {v.isLighter ? (
+                <Badge variant="secondary" className="text-[10px]">
+                  Lighter
+                </Badge>
+              ) : null}
             </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">IMO</dt>
-              <dd className="font-medium">{formatNum(v.imoNo)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Flag</dt>
-              <dd className="font-medium">{formatNum(v.flag)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Deadweight (MT)
-              </dt>
-              <dd className="font-medium">{formatNum(v.deadweightTon)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                isLighter
-              </dt>
-              <dd className="font-medium">{v.isLighter ? "Yes" : "No"}</dd>
-            </div>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              Lighter vessel registry
+              {v.imoNo ? <span> · IMO {v.imoNo}</span> : null}
+              {v.flag ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <span className="inline-flex items-center gap-1 align-middle">
+                    <Flag className="size-3" />
+                    {v.flag}
+                  </span>
+                </>
+              ) : null}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <CardContent className="space-y-3 pt-4">
+        <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <Ruler className="size-3.5" /> Specifications
+          </p>
+          <dl className="grid gap-x-3 gap-y-2 text-xs sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+            {[
+              { label: "Type", value: formatNum(v.vesselType) },
+              { label: "Year built", value: v.yearBuilt != null ? String(v.yearBuilt) : "—" },
+              { label: "DWT (MT)", value: formatNum(v.deadweightTon) },
+              { label: "LOA (m)", value: formatNum(v.lengthOverallM) },
+              { label: "Beam (m)", value: formatNum(v.beamM) },
+              { label: "Max draft (m)", value: formatNum(v.maxDraftMeters) }
+            ].map(({ label, value }) => (
+              <div key={label}>
+                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {label}
+                </dt>
+                <dd className="mt-0.5 font-medium">{value}</dd>
+              </div>
+            ))}
           </dl>
         </div>
 
@@ -118,6 +163,55 @@ function LighterVesselRegistryPanel({
   );
 }
 
+type TripMilestone = { label: string; iso: string | null };
+
+function TripMilestoneStrip({ steps }: { steps: TripMilestone[] }) {
+  return (
+    <ol className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
+      {steps.map((s, i) => {
+        const done = !!s.iso;
+        const Icon = done ? CheckCircle2 : Circle;
+        return (
+          <li
+            key={`${s.label}-${i}`}
+            className={cn(
+              "flex items-start gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors",
+              done
+                ? "border-sky-500/30 bg-sky-500/5"
+                : "border-dashed border-border bg-muted/20 text-muted-foreground"
+            )}
+          >
+            <Icon
+              className={cn(
+                "mt-0.5 size-3.5 shrink-0",
+                done ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground/60"
+              )}
+            />
+            <div className="min-w-0 flex-1">
+              <p
+                className={cn(
+                  "truncate text-[10px] font-medium uppercase tracking-wide",
+                  done ? "text-foreground/80" : "text-muted-foreground"
+                )}
+              >
+                {s.label}
+              </p>
+              <p
+                className={cn(
+                  "mt-0.5 font-mono text-[11px] leading-snug",
+                  done ? "text-foreground" : "text-muted-foreground/70"
+                )}
+              >
+                {formatDt(s.iso)}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export function LighterTripOverviewPanel({
   lighterTrip
 }: {
@@ -137,92 +231,113 @@ export function LighterTripOverviewPanel({
   const lv = lighterTrip.lighterVessel;
   const vc = lighterTrip.vesselCall;
 
+  const milestones: TripMilestone[] = [
+    { label: "Assigned", iso: lighterTrip.assignedAt },
+    { label: "Alongside MV", iso: lighterTrip.alongsideDate },
+    { label: "Loading started", iso: lighterTrip.loadingStartedAt },
+    { label: "Loading completed", iso: lighterTrip.loadingCompletedAt },
+    { label: "Departed MV", iso: lighterTrip.departedMvDate },
+    { label: "Arrived ghat", iso: lighterTrip.arrivedGhatDate },
+    { label: "Unload started", iso: lighterTrip.unloadStartedAt },
+    { label: "Unload completed", iso: lighterTrip.unloadCompletedAt }
+  ];
+
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Lighter trip (read-only)</CardTitle>
-          <CardDescription className="text-xs">
-            Trip {lighterTrip.tripNo} · {lv.name} · Mother {vc.vessel.name} ({vc.callNo})
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-            <dl className="grid gap-x-3 gap-y-2 text-xs sm:grid-cols-2 md:grid-cols-3">
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Trip status
-                </dt>
-                <dd className="font-semibold">{lighterTrip.status}</dd>
+      <Card className="overflow-hidden">
+        <div className="border-b border-border bg-gradient-to-r from-sky-500/10 via-card to-card px-5 py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                <Waves className="size-5" />
               </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Lighter
-                </dt>
-                <dd className="font-medium">{lv.name}</dd>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate text-lg font-semibold tracking-tight">
+                    {lv.name}
+                  </h2>
+                  <Badge variant={lighterTripStatusVariant(lighterTrip.status)}>
+                    {lighterTrip.status}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 truncate text-xs text-muted-foreground">
+                  <Route className="size-3" />
+                  <span className="font-mono text-foreground/80">Trip {lighterTrip.tripNo}</span>
+                  <span>·</span>
+                  <Ship className="size-3" />
+                  <span>
+                    {vc.vessel.name}{" "}
+                    <span className="font-mono text-foreground/70">({vc.callNo})</span>
+                  </span>
+                </p>
               </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Mother vessel · call
-                </dt>
-                <dd className="font-medium break-words">
-                  {vc.vessel.name} · {vc.callNo}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Call status
-                </dt>
-                <dd className="font-medium">{vc.status}</dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Call discharge (MT)
-                </dt>
-                <dd className="font-medium">{formatNum(vc.totalDischargeMt)}</dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Lighter IMO
-                </dt>
-                <dd className="font-medium">{formatNum(lv.imoNo)}</dd>
-              </div>
-            </dl>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Badge variant="outline" className="gap-1">
+                <Anchor className="size-3" />
+                Call {vc.status}
+              </Badge>
+              {vc.cargoNameSnapshot ? (
+                <Badge variant="secondary" className="gap-1">
+                  <PackageOpen className="size-3" />
+                  {vc.cargoNameSnapshot}
+                </Badge>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <CardContent className="space-y-4 pt-4">
+          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-md border border-border bg-card px-3 py-2.5 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Lighter IMO
+              </p>
+              <p className="mt-1 truncate font-mono text-sm font-semibold">
+                {formatNum(lv.imoNo)}
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-card px-3 py-2.5 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                DWT
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold">
+                {formatNum(lv.deadweightTon)}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">MT</span>
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-card px-3 py-2.5 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Mother call discharge
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold">
+                {formatNum(vc.totalDischargeMt)}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">MT</span>
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-card px-3 py-2.5 shadow-sm">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Flag · Year
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold">
+                {formatNum(lv.flag)}
+                <span className="text-muted-foreground"> · </span>
+                {lv.yearBuilt != null ? lv.yearBuilt : "—"}
+              </p>
+            </div>
           </div>
 
-          <Collapsible defaultOpen={false}>
-            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-left text-sm font-medium hover:bg-muted/50 [&[data-state=open]>svg]:rotate-180">
-              <span>Full trip timeline &amp; milestones</span>
-              <ChevronDown
-                className="size-4 shrink-0 transition-transform duration-200"
-                aria-hidden
-              />
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-3 pt-4">
-              <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                {[
-                  ["assignedAt", formatDt(lighterTrip.assignedAt)],
-                  ["alongsideDate", formatDt(lighterTrip.alongsideDate)],
-                  ["loadingStartedAt", formatDt(lighterTrip.loadingStartedAt)],
-                  ["loadingCompletedAt", formatDt(lighterTrip.loadingCompletedAt)],
-                  ["departedMvDate", formatDt(lighterTrip.departedMvDate)],
-                  ["arrivedGhatDate", formatDt(lighterTrip.arrivedGhatDate)],
-                  ["unloadStartedAt", formatDt(lighterTrip.unloadStartedAt)],
-                  ["unloadCompletedAt", formatDt(lighterTrip.unloadCompletedAt)]
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="space-y-0.5">
-                    <dt className="text-xs text-muted-foreground">{label}</dt>
-                    <dd className="font-medium break-words">{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </CollapsibleContent>
-          </Collapsible>
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Route className="size-3.5" /> Trip milestones
+            </p>
+            <TripMilestoneStrip steps={milestones} />
+          </div>
         </CardContent>
       </Card>
 
-      <MotherVesselOverviewPanel vesselCall={vc} />
       <LighterVesselRegistryPanel lighterVessel={lv} />
+      <MotherVesselOverviewPanel vesselCall={vc} />
     </div>
   );
 }

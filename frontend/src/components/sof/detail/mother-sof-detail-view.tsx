@@ -65,6 +65,7 @@ import {
   recalculateMotherLaytime,
   updateMotherSof,
   type LaytimeBreakdown,
+  type LaytimeChronologyRow,
   type MotherLaytimeDailyLedger,
   type MotherLaytimeTimesheet
 } from "@/lib/sof-api";
@@ -157,6 +158,14 @@ export function MotherSofDetailView({
   const [status, setStatus] = useState("");
   const [layAllowed, setLayAllowed] = useState("");
   const [formErr, setFormErr] = useState<string | null>(null);
+
+  const [layTz, setLayTz] = useState("");
+  const layTzDatalistId = useId();
+  const layTzPreviewIana = layTz.trim() || DEFAULT_LAYTIME_IANA_ZONE;
+  const layTzGmtPreview = useMemo(
+    () => formatGmtOffsetForZone(layTzPreviewIana),
+    [layTzPreviewIana]
+  );
 
   useEffect(() => {
     if (sof) {
@@ -361,15 +370,8 @@ export function MotherSofDetailView({
     breakdown: LaytimeBreakdown;
     timesheet: MotherLaytimeTimesheet;
     dailyLedger: MotherLaytimeDailyLedger;
+    chronology: LaytimeChronologyRow[];
   } | null>(null);
-
-  const [layTz, setLayTz] = useState("");
-  const layTzDatalistId = useId();
-  const layTzPreviewIana = layTz.trim() || DEFAULT_LAYTIME_IANA_ZONE;
-  const layTzGmtPreview = useMemo(
-    () => formatGmtOffsetForZone(layTzPreviewIana),
-    [layTzPreviewIana]
-  );
 
   const patchVcLayTzMut = useMutation({
     mutationFn: async () => {
@@ -390,7 +392,8 @@ export function MotherSofDetailView({
       setLayRecalc({
         breakdown: res.breakdown,
         timesheet: res.timesheet,
-        dailyLedger: res.dailyLedger
+        dailyLedger: res.dailyLedger,
+        chronology: res.chronology ?? []
       });
       void qc.invalidateQueries({ queryKey: ["mother-sof", id] });
     },
@@ -649,6 +652,7 @@ export function MotherSofDetailView({
                       dailyLedger={layRecalc.dailyLedger}
                       timesheet={layRecalc.timesheet}
                       breakdown={layRecalc.breakdown}
+                      chronology={layRecalc.chronology}
                     />
                   ) : null}
                 </div>
@@ -907,6 +911,7 @@ export function MotherSofDetailView({
                     dailyLedger={layRecalc.dailyLedger}
                     timesheet={layRecalc.timesheet}
                     breakdown={layRecalc.breakdown}
+                    chronology={layRecalc.chronology}
                   />
                 ) : null}
               </div>

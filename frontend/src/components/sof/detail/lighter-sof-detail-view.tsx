@@ -57,6 +57,7 @@ import {
   recalculateLighterLaytime,
   updateLighterSof,
   type LaytimeBreakdown,
+  type LaytimeChronologyRow,
   type MotherLaytimeDailyLedger,
   type MotherLaytimeTimesheet
 } from "@/lib/sof-api";
@@ -294,6 +295,7 @@ export function LighterSofDetailView({
     breakdown: LaytimeBreakdown;
     timesheet: MotherLaytimeTimesheet;
     dailyLedger: MotherLaytimeDailyLedger;
+    chronology: LaytimeChronologyRow[];
   } | null>(null);
 
   const patchVcLayTzMut = useMutation({
@@ -316,7 +318,8 @@ export function LighterSofDetailView({
       setLayRecalc({
         breakdown: res.breakdown,
         timesheet: res.timesheet,
-        dailyLedger: res.dailyLedger
+        dailyLedger: res.dailyLedger,
+        chronology: res.chronology ?? []
       });
       void qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
     },
@@ -632,6 +635,7 @@ export function LighterSofDetailView({
                     dailyLedger={layRecalc.dailyLedger}
                     timesheet={layRecalc.timesheet}
                     breakdown={layRecalc.breakdown}
+                    chronology={layRecalc.chronology}
                   />
                 ) : null}
               </div>

@@ -11,6 +11,7 @@ import {
 } from "@/lib/laytime-hours-format";
 import type {
   LaytimeBreakdown,
+  LaytimeChronologyRow,
   MotherLaytimeDailyLedger,
   MotherLaytimeTimesheet
 } from "@/lib/sof-api";
@@ -66,18 +67,30 @@ function Th({
   );
 }
 
+function fmtLaysoftDhm(hours: number): string {
+  const mins = Math.round(Math.max(0, hours) * 60);
+  const d = Math.floor(mins / (24 * 60));
+  const r = mins % (24 * 60);
+  const h = Math.floor(r / 60);
+  const m = r % 60;
+  return `${d}d-${String(h).padStart(2, "0")}h-${String(m).padStart(2, "0")}m`;
+}
+
 export type MotherLaytimeTimesheetLayout = "default" | "priority";
 
 export function MotherLaytimeTimesheetTable({
   dailyLedger,
   timesheet,
   breakdown,
+  chronology = [],
   className,
   sheetLayout = "priority"
 }: {
   dailyLedger: MotherLaytimeDailyLedger;
   timesheet: MotherLaytimeTimesheet;
   breakdown: LaytimeBreakdown;
+  /** Day-split chronology (Laytime2000-style); empty until recalculate returns rows. */
+  chronology?: LaytimeChronologyRow[];
   className?: string;
   /** priority: daily + event tables first; supporting text in a collapsible. */
   sheetLayout?: MotherLaytimeTimesheetLayout;
@@ -179,8 +192,8 @@ export function MotherLaytimeTimesheetTable({
           </tr>
           <tr className="bg-muted/25 text-[11px]">
             <td colSpan={8} className="px-2 py-1.5 text-muted-foreground">
-              <span className="font-medium text-foreground">Statement vs free time:</span> contract
-              hrs total {formatDecimalHoursToHMin(breakdown.usedHours)}
+              <span className="font-medium text-foreground">Laytime used (events + calendar):</span>{" "}
+              {formatDecimalHoursToHMin(breakdown.usedHours)}
               {breakdown.allowedHours != null
                 ? ` · free ${formatDecimalHoursToDaysHMin(breakdown.allowedHours)} (${formatDecimalHoursToTotalHoursMin(breakdown.allowedHours)})`
                 : ""}
@@ -203,6 +216,70 @@ export function MotherLaytimeTimesheetTable({
       </table>
     </div>
   );
+
+  const chronologyTable =
+    chronology.length === 0 ? null : (
+      <div className="w-full overflow-x-auto rounded-md border border-border text-xs">
+        <table className="w-full min-w-[900px] border-collapse xl:min-w-[1000px]">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
+                Day
+              </th>
+              <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
+                Date
+              </th>
+              <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
+                Start
+              </th>
+              <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
+                End
+              </th>
+              <th className="px-2 py-2 text-right text-[11px] font-semibold text-muted-foreground">
+                Frac
+              </th>
+              <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
+                Remark
+              </th>
+              <th className="px-2 py-2 text-right text-[11px] font-semibold text-muted-foreground">
+                To count
+              </th>
+              <th className="px-2 py-2 text-right text-[11px] font-semibold text-muted-foreground">
+                Total time
+              </th>
+              <th className="px-2 py-2 text-right text-[11px] font-semibold text-muted-foreground">
+                On dem
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {chronology.map((r, i) => (
+              <tr key={`${r.date}-${r.startLocalHm}-${r.endLocalHm}-${i}`} className="border-b">
+                <td className="whitespace-nowrap px-2 py-1 capitalize">{r.weekday}</td>
+                <td className="whitespace-nowrap px-2 py-1 font-mono">{r.date}</td>
+                <td className="whitespace-nowrap px-2 py-1 font-mono">{r.startLocalHm}</td>
+                <td className="whitespace-nowrap px-2 py-1 font-mono">{r.endLocalHm}</td>
+                <td className="whitespace-nowrap px-2 py-1 text-right font-mono tabular-nums">
+                  {r.fraction}
+                </td>
+                <td className="max-w-[14rem] truncate px-2 py-1 text-[11px]" title={r.remark}>
+                  {r.remark}
+                </td>
+                <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px]">
+                  {fmtLaysoftDhm(r.toCountHours)}
+                </td>
+                <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px]">
+                  {fmtLaysoftDhm(r.totalUsedHours)}
+                </td>
+                <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px]">
+                  {fmtLaysoftDhm(r.onDemurrageHours)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
 
   const eventsTable = (
     <div className="w-full overflow-x-auto rounded-md border border-border text-xs">
@@ -347,6 +424,20 @@ export function MotherLaytimeTimesheetTable({
             </dd>
           </div>
           <div>
+            <dt className="text-muted-foreground">Time counting (Frac)</dt>
+            <dd className="text-[11px] font-medium">
+              applied{" "}
+              {c.laytimeCountingFractionApplied != null
+                ? c.laytimeCountingFractionApplied.toFixed(4).replace(/\.?0+$/, "")
+                : "—"}{" "}
+              · explicit {c.laytimeCountingFraction != null ? fmt2(c.laytimeCountingFraction) : "—"}{" "}
+              · hatches{" "}
+              {c.workableHatches != null || c.totalHatches != null
+                ? `${c.workableHatches ?? "—"} / ${c.totalHatches ?? "—"}`
+                : "—"}
+            </dd>
+          </div>
+          <div>
             <dt className="text-muted-foreground">Excluded weekdays (segment engine)</dt>
             <dd className="text-[11px] font-medium">
               {c.excludedDays?.length ? c.excludedDays.join(", ") : "—"}
@@ -362,6 +453,21 @@ export function MotherLaytimeTimesheetTable({
       <div className={cn("space-y-4", className)}>
         {auxiliaryBlock}
         {dailyTable}
+        <Collapsible defaultOpen={false}>
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="outline" size="sm" className="gap-1.5 text-xs">
+              <ChevronDown className="size-3.5 shrink-0 opacity-70" />
+              Port chronology (Laytime2000-style)
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 space-y-2">
+            {chronologyTable ?? (
+              <p className="text-[11px] text-muted-foreground">
+                Run recalculate to generate the chronology grid.
+              </p>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
         <Collapsible defaultOpen={false}>
           <CollapsibleTrigger asChild>
             <Button type="button" variant="outline" size="sm" className="gap-1.5 text-xs">
@@ -399,6 +505,13 @@ export function MotherLaytimeTimesheetTable({
           <span className="font-medium text-foreground">Week</span> {weekLabel}
         </span>
       ) : null}
+      {c.laytimeCountingFractionApplied != null &&
+      Math.abs(c.laytimeCountingFractionApplied - 1) > 1e-9 ? (
+        <span className="font-mono tabular-nums">
+          <span className="font-medium text-foreground">Frac</span>{" "}
+          {c.laytimeCountingFractionApplied.toFixed(4).replace(/\.?0+$/, "")}
+        </span>
+      ) : null}
     </div>
   );
 
@@ -411,6 +524,22 @@ export function MotherLaytimeTimesheetTable({
           Daily laytime calculation
         </h3>
         {dailyTable}
+      </section>
+
+      <section className="space-y-1">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Port chronology (Laytime2000-style)
+        </h3>
+        <p className="text-[10px] text-muted-foreground">
+          Each row is a local calendar slice of an SOF segment. After allowed laytime is consumed,
+          excluded weekdays still accrue (once on demurrage, always on demurrage).
+        </p>
+        {chronologyTable ?? (
+          <p className="text-[11px] text-muted-foreground">
+            Run <span className="font-medium text-foreground">Recalculate</span> to generate the
+            chronology grid.
+          </p>
+        )}
       </section>
 
       <section className="space-y-1">

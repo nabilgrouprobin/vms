@@ -16,7 +16,6 @@ import {
   PickerScrollArea,
   SelectablePickerCard
 } from "@/components/workspace/mother-lighter-picker";
-import { fetchLighterVesselsForPicker } from "@/lib/lighter-trips-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { fetchLighterSofs, fetchMotherSofs } from "@/lib/sof-api";
 import { fetchVesselCalls } from "@/lib/vessel-calls-api";

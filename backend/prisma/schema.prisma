@@ -1350,6 +1350,11 @@ model ImportContract {
   laytimeDemurrageRatePerDay Decimal?   @map("laytime_demurrage_rate_per_day") @db.Decimal(18, 4)
   /// Laytime dispatch rate per day when time saved vs allowed (optional CP term)
   laytimeDispatchRatePerDay  Decimal?   @map("laytime_dispatch_rate_per_day") @db.Decimal(18, 4)
+  /// Optional CP multiplier (0–1] on calendar-adjusted laytime hours (Laytime2000 “Frac”); explicit impact hours skip this.
+  laytimeCountingFraction    Decimal?   @map("laytime_counting_fraction") @db.Decimal(8, 6)
+  /// With `totalHatches`, default fraction = workableHatches / totalHatches when `laytimeCountingFraction` is null.
+  workableHatches            Int?       @map("workable_hatches")
+  totalHatches               Int?       @map("total_hatches")
   excludedDays           String[]       @default(["FRIDAY", "SATURDAY"]) @map("excluded_days")
   holidaysExcluded       Boolean?       @default(true) @map("holidays_excluded")
   excludedTimePeriod     String?        @map("excluded_time_period")

@@ -10,6 +10,9 @@ export type ImportContractDetail = {
   dischargeRateUnit: string | null;
   laytimeDemurrageRatePerDay: string | null;
   laytimeDispatchRatePerDay: string | null;
+  laytimeCountingFraction: string | null;
+  workableHatches: number | null;
+  totalHatches: number | null;
   currency: string | null;
   dischargePort: string | null;
   /** ISO date from API when present (commercial / LC workflow). */
@@ -25,6 +28,9 @@ export type UpdateImportContractBody = {
   dischargeRateUnit?: string | null;
   laytimeDemurrageRatePerDay?: number | null;
   laytimeDispatchRatePerDay?: number | null;
+  laytimeCountingFraction?: number | null;
+  workableHatches?: number | null;
+  totalHatches?: number | null;
   currency?: string | null;
   dischargePort?: string | null;
 };

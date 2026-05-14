@@ -4,6 +4,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo } from "react";
 
+import { useNowMs } from "@/hooks/use-now-ms";
 import { SofStatusBadge } from "@/components/sof/sof-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +25,8 @@ export function MotherDischargeReportsTable({
   /** When true, omit outer Card — use inside `MotherLighterPickerCard` + `PickerScrollArea variant="panel"`. */
   embedded?: boolean;
 }) {
+  const nowMs = useNowMs();
+
   const query = useInfiniteQuery({
     queryKey: ["mother-sof", "reports", search],
     initialPageParam: undefined as string | undefined,
@@ -186,7 +189,7 @@ export function MotherDischargeReportsTable({
           const m = vc ? metricsFor(byId, vc.id) : undefined;
           const p = m?.pipeline;
           const days = vc?.ata
-            ? Math.max(0, Math.floor((Date.now() - new Date(vc.ata).getTime()) / 86_400_000))
+            ? Math.max(0, Math.floor((nowMs - new Date(vc.ata).getTime()) / 86_400_000))
             : null;
 
           return (

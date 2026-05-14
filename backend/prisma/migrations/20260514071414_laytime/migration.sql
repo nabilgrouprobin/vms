@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "sof_hourly_statuses_statement_id_event_type_id_hour_start_at_id" RENAME TO "sof_hourly_statuses_statement_id_event_type_id_hour_start_a_idx";

@@ -266,7 +266,7 @@ export function buildMotherLaytimeDailyLedger(params: {
   }
 
   const rows: MotherLaytimeDailyLedgerRow[] = [];
-  let cumContact = 0;
+  let cumWorkingForDem = 0;
   let guard = 0;
 
   while (+dayCursor <= +endDay && guard++ < MAX_LEDGER_DAYS) {
@@ -281,17 +281,17 @@ export function buildMotherLaytimeDailyLedger(params: {
     const working = workingByDay.get(k) ?? 0;
     const idle = Math.max(0, 24 - working);
 
-    const prevCum = cumContact;
-    cumContact += contact;
+    const prevCumWorking = cumWorkingForDem;
+    cumWorkingForDem += working;
 
     let demurrage = 0;
     if (free !== null && free > 0) {
-      if (cumContact <= free) {
-        demurrage = 0;
-      } else if (prevCum < free) {
-        demurrage = Math.min(24, cumContact - free);
+      if (prevCumWorking >= free - 1e-9) {
+        demurrage = working;
+      } else if (cumWorkingForDem > free) {
+        demurrage = cumWorkingForDem - free;
       } else {
-        demurrage = 24;
+        demurrage = 0;
       }
     }
 

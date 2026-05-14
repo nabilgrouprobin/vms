@@ -7,6 +7,11 @@ import {
   parseExcludedWeekdays,
   resolveLaytimeZone
 } from "./laytime-calendar-count";
+import { buildLaytimeChronology, type LaytimeChronologyRow } from "./laytime-chronology";
+import {
+  applyLaytimeCountingFractionToSegments,
+  resolveLaytimeCountingFractionFromContract
+} from "./laytime-counting-fraction";
 import { accumulateLaytimeSegmentsFromEvents } from "./laytime-event-accumulation";
 import {
   buildMotherLaytimeDailyLedger,
@@ -47,6 +52,12 @@ export type MotherLaytimeContractSummary = {
   laytimeResolvedTimeZone: string;
   /** Contract working-week window used for “contact” hours in the daily sheet */
   contractWeekLabel: string;
+  /** Explicit CP counting fraction when set */
+  laytimeCountingFraction: number | null;
+  workableHatches: number | null;
+  totalHatches: number | null;
+  /** Effective multiplier applied to segments (explicit wins over hatch ratio) */
+  laytimeCountingFractionApplied: number | null;
 };
 
 export type MotherLaytimeTimesheetRow = {
@@ -91,11 +102,33 @@ export type MotherLaytimeRecalculateResult = {
   breakdown: LaytimeBreakdown;
   timesheet: MotherLaytimeTimesheet;
   dailyLedger: MotherLaytimeDailyLedger;
+  chronology: LaytimeChronologyRow[];
 };
 
 function num(d: Prisma.Decimal | null | undefined): number | null {
   if (d === null || d === undefined) return null;
   const n = Number(d);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Widen until `prisma generate` runs after laytime-counting migration. */
+type ImportContractLaytimeCountingSlice = {
+  laytimeCountingFraction?: unknown;
+  workableHatches?: number | null;
+  totalHatches?: number | null;
+};
+
+function importContractLaytimeSlice(c: unknown): ImportContractLaytimeCountingSlice {
+  return (c ?? {}) as ImportContractLaytimeCountingSlice;
+}
+
+function laytimeStoredFractionNum(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "object" && v !== null && "toString" in v) {
+    const n = Number((v as { toString(): string }).toString());
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -214,11 +247,20 @@ export class LaytimeCalculationService {
     );
 
     const eventById = new Map(row.events.map((e) => [e.id, e]));
-    const { segments } = applyImportContractCalendarToMotherSegments(
+    const { segments: calendarSegments } = applyImportContractCalendarToMotherSegments(
       raw.segments,
       eventById,
       contract?.excludedDays,
-      vc.laytimeTimeZone
+      vc.laytimeTimeZone,
+      allowed
+    );
+    const countingFracApplied = resolveLaytimeCountingFractionFromContract(
+      importContractLaytimeSlice(contract)
+    );
+    const segments = applyLaytimeCountingFractionToSegments(
+      calendarSegments,
+      countingFracApplied,
+      eventById
     );
 
     const resolvedZone = resolveLaytimeZone(vc.laytimeTimeZone);
@@ -245,79 +287,13 @@ export class LaytimeCalculationService {
       }))
     });
 
-    const contactUsedTotal = dailyLedger.totalContactHour;
-    const idleLedgerTotal = dailyLedger.totalIdleHour;
-    const demurrageHoursLedger = dailyLedger.totalDemurrageHour;
-
-    const allowedNum = allowed ?? 0;
-    const balance = allowed !== null ? allowedNum - contactUsedTotal : null;
-    const dispatchHours = allowed !== null ? Math.max(0, allowedNum - contactUsedTotal) : 0;
-    const demurrageHours = demurrageHoursLedger;
+    const usedLaytimeTotal = dailyLedger.totalWorkingHour;
 
     const demRate = num(contract?.laytimeDemurrageRatePerDay);
     const disRate = num(contract?.laytimeDispatchRatePerDay);
     const currency = contract?.currency ?? null;
 
-    const demurrageAmount =
-      allowed !== null && demRate !== null && demurrageHours > 0
-        ? (demurrageHours / 24) * demRate
-        : null;
-    const dispatchAmount =
-      allowed !== null && disRate !== null && dispatchHours > 0
-        ? (dispatchHours / 24) * disRate
-        : null;
-    const netAmount =
-      demurrageAmount !== null || dispatchAmount !== null
-        ? (demurrageAmount ?? 0) - (dispatchAmount ?? 0)
-        : null;
-
-    const data: Prisma.StatementOfFactsUpdateInput = {
-      laytimeCommenceAt: commence,
-      laytimeUsedHours: new Prisma.Decimal(contactUsedTotal.toFixed(4)),
-      laytimeExcludedHours: new Prisma.Decimal(idleLedgerTotal.toFixed(4)),
-      laytimeBalanceHours: balance !== null ? new Prisma.Decimal(balance.toFixed(4)) : null
-    };
-
-    if (allowedSource === "CONTRACT_DISCHARGE_RATE" && allowed !== null) {
-      data.laytimeAllowedHours = new Prisma.Decimal(allowedNum.toFixed(4));
-    }
-
-    if (demurrageAmount !== null) {
-      data.demurrageAmount = new Prisma.Decimal(demurrageAmount.toFixed(2));
-    } else {
-      data.demurrageAmount = null;
-    }
-    if (dispatchAmount !== null) {
-      data.dispatchAmount = new Prisma.Decimal(dispatchAmount.toFixed(2));
-    } else {
-      data.dispatchAmount = null;
-    }
-    if (netAmount !== null) {
-      data.netAmount = new Prisma.Decimal(netAmount.toFixed(2));
-    } else {
-      data.netAmount = null;
-    }
-
-    const updated = await this.prisma.statementOfFacts.update({
-      where: { id: statementId },
-      data
-    });
-
-    const breakdown: LaytimeBreakdown = {
-      commenceAt: commence.toISOString(),
-      allowedHours: allowed,
-      allowedSource,
-      usedHours: contactUsedTotal,
-      excludedHours: idleLedgerTotal,
-      balanceHours: balance ?? 0,
-      demurrageHours,
-      dispatchHours,
-      demurrageAmount,
-      dispatchAmount,
-      netAmount,
-      currency
-    };
-
+    const icLay = importContractLaytimeSlice(contract);
     const contractSummary: MotherLaytimeContractSummary = {
       cargoQtyMt: qty,
       dischargeRateMtPerDay: rate,
@@ -331,7 +307,11 @@ export class LaytimeCalculationService {
       holidaysExcluded: contract?.holidaysExcluded ?? null,
       laytimeTimeZoneRaw: vc.laytimeTimeZone ?? null,
       laytimeResolvedTimeZone: resolvedZone,
-      contractWeekLabel: formatContractWeekWindowLabel(weekWindow)
+      contractWeekLabel: formatContractWeekWindowLabel(weekWindow),
+      laytimeCountingFraction: laytimeStoredFractionNum(icLay.laytimeCountingFraction),
+      workableHatches: icLay.workableHatches ?? null,
+      totalHatches: icLay.totalHatches ?? null,
+      laytimeCountingFractionApplied: countingFracApplied
     };
 
     const excludedSet = parseExcludedWeekdays(contract?.excludedDays);
@@ -364,9 +344,86 @@ export class LaytimeCalculationService {
       };
     });
 
+    const excludedPersist = rows.reduce((s, r) => s + r.countingExcludedHours, 0);
     const timesheet: MotherLaytimeTimesheet = { contractSummary, rows };
 
-    return { statement: updated, breakdown, timesheet, dailyLedger };
+    const allowedNum = allowed ?? 0;
+    const balance = allowed !== null ? allowedNum - usedLaytimeTotal : null;
+    const dispatchHours = allowed !== null ? Math.max(0, allowedNum - usedLaytimeTotal) : 0;
+    const demurrageHours = allowed !== null ? Math.max(0, usedLaytimeTotal - allowedNum) : 0;
+
+    const demurrageAmount =
+      allowed !== null && demRate !== null && demurrageHours > 0
+        ? (demurrageHours / 24) * demRate
+        : null;
+    const dispatchAmount =
+      allowed !== null && disRate !== null && dispatchHours > 0
+        ? (dispatchHours / 24) * disRate
+        : null;
+    const netAmount =
+      demurrageAmount !== null || dispatchAmount !== null
+        ? (demurrageAmount ?? 0) - (dispatchAmount ?? 0)
+        : null;
+
+    const data: Prisma.StatementOfFactsUpdateInput = {
+      laytimeCommenceAt: commence,
+      laytimeUsedHours: new Prisma.Decimal(usedLaytimeTotal.toFixed(4)),
+      laytimeExcludedHours: new Prisma.Decimal(excludedPersist.toFixed(4)),
+      laytimeBalanceHours: balance !== null ? new Prisma.Decimal(balance.toFixed(4)) : null
+    };
+
+    if (allowedSource === "CONTRACT_DISCHARGE_RATE" && allowed !== null) {
+      data.laytimeAllowedHours = new Prisma.Decimal(allowedNum.toFixed(4));
+    }
+
+    if (demurrageAmount !== null) {
+      data.demurrageAmount = new Prisma.Decimal(demurrageAmount.toFixed(2));
+    } else {
+      data.demurrageAmount = null;
+    }
+    if (dispatchAmount !== null) {
+      data.dispatchAmount = new Prisma.Decimal(dispatchAmount.toFixed(2));
+    } else {
+      data.dispatchAmount = null;
+    }
+    if (netAmount !== null) {
+      data.netAmount = new Prisma.Decimal(netAmount.toFixed(2));
+    } else {
+      data.netAmount = null;
+    }
+
+    const updated = await this.prisma.statementOfFacts.update({
+      where: { id: statementId },
+      data
+    });
+
+    const breakdown: LaytimeBreakdown = {
+      commenceAt: commence.toISOString(),
+      allowedHours: allowed,
+      allowedSource,
+      usedHours: usedLaytimeTotal,
+      excludedHours: excludedPersist,
+      balanceHours: balance ?? 0,
+      demurrageHours,
+      dispatchHours,
+      demurrageAmount,
+      dispatchAmount,
+      netAmount,
+      currency
+    };
+
+    const remarkByEventId = new Map<string, string>();
+    for (const e of row.events) {
+      remarkByEventId.set(e.id, buildSofEventRemark(e));
+    }
+    const chronology = buildLaytimeChronology({
+      segments,
+      zone: resolvedZone,
+      allowedHours: allowed,
+      remarkByClosingEventId: remarkByEventId
+    });
+
+    return { statement: updated, breakdown, timesheet, dailyLedger, chronology };
   }
 
   /**
@@ -458,11 +515,20 @@ export class LaytimeCalculationService {
     );
 
     const eventById = new Map(row.events.map((e) => [e.id, e]));
-    const { segments } = applyImportContractCalendarToMotherSegments(
+    const { segments: calendarSegments } = applyImportContractCalendarToMotherSegments(
       raw.segments,
       eventById,
       contract?.excludedDays,
-      vc.laytimeTimeZone
+      vc.laytimeTimeZone,
+      allowed
+    );
+    const countingFracApplied = resolveLaytimeCountingFractionFromContract(
+      importContractLaytimeSlice(contract)
+    );
+    const segments = applyLaytimeCountingFractionToSegments(
+      calendarSegments,
+      countingFracApplied,
+      eventById
     );
 
     const resolvedZone = resolveLaytimeZone(vc.laytimeTimeZone);
@@ -489,79 +555,13 @@ export class LaytimeCalculationService {
       }))
     });
 
-    const contactUsedTotal = dailyLedger.totalContactHour;
-    const idleLedgerTotal = dailyLedger.totalIdleHour;
-    const demurrageHoursLedger = dailyLedger.totalDemurrageHour;
-
-    const allowedNum = allowed ?? 0;
-    const balance = allowed !== null ? allowedNum - contactUsedTotal : null;
-    const dispatchHours = allowed !== null ? Math.max(0, allowedNum - contactUsedTotal) : 0;
-    const demurrageHours = demurrageHoursLedger;
+    const usedLaytimeTotal = dailyLedger.totalWorkingHour;
 
     const demRate = num(contract?.laytimeDemurrageRatePerDay);
     const disRate = num(contract?.laytimeDispatchRatePerDay);
     const currency = contract?.currency ?? null;
 
-    const demurrageAmount =
-      allowed !== null && demRate !== null && demurrageHours > 0
-        ? (demurrageHours / 24) * demRate
-        : null;
-    const dispatchAmount =
-      allowed !== null && disRate !== null && dispatchHours > 0
-        ? (dispatchHours / 24) * disRate
-        : null;
-    const netAmount =
-      demurrageAmount !== null || dispatchAmount !== null
-        ? (demurrageAmount ?? 0) - (dispatchAmount ?? 0)
-        : null;
-
-    const data: Prisma.StatementOfFactsUpdateInput = {
-      laytimeCommenceAt: commence,
-      laytimeUsedHours: new Prisma.Decimal(contactUsedTotal.toFixed(4)),
-      laytimeExcludedHours: new Prisma.Decimal(idleLedgerTotal.toFixed(4)),
-      laytimeBalanceHours: balance !== null ? new Prisma.Decimal(balance.toFixed(4)) : null
-    };
-
-    if (allowedSource === "CONTRACT_DISCHARGE_RATE" && allowed !== null) {
-      data.laytimeAllowedHours = new Prisma.Decimal(allowedNum.toFixed(4));
-    }
-
-    if (demurrageAmount !== null) {
-      data.demurrageAmount = new Prisma.Decimal(demurrageAmount.toFixed(2));
-    } else {
-      data.demurrageAmount = null;
-    }
-    if (dispatchAmount !== null) {
-      data.dispatchAmount = new Prisma.Decimal(dispatchAmount.toFixed(2));
-    } else {
-      data.dispatchAmount = null;
-    }
-    if (netAmount !== null) {
-      data.netAmount = new Prisma.Decimal(netAmount.toFixed(2));
-    } else {
-      data.netAmount = null;
-    }
-
-    const updated = await this.prisma.statementOfFacts.update({
-      where: { id: statementId },
-      data
-    });
-
-    const breakdown: LaytimeBreakdown = {
-      commenceAt: commence.toISOString(),
-      allowedHours: allowed,
-      allowedSource,
-      usedHours: contactUsedTotal,
-      excludedHours: idleLedgerTotal,
-      balanceHours: balance ?? 0,
-      demurrageHours,
-      dispatchHours,
-      demurrageAmount,
-      dispatchAmount,
-      netAmount,
-      currency
-    };
-
+    const icLay = importContractLaytimeSlice(contract);
     const contractSummary: MotherLaytimeContractSummary = {
       cargoQtyMt: qty,
       dischargeRateMtPerDay: rate,
@@ -575,7 +575,11 @@ export class LaytimeCalculationService {
       holidaysExcluded: contract?.holidaysExcluded ?? null,
       laytimeTimeZoneRaw: vc.laytimeTimeZone ?? null,
       laytimeResolvedTimeZone: resolvedZone,
-      contractWeekLabel: formatContractWeekWindowLabel(weekWindow)
+      contractWeekLabel: formatContractWeekWindowLabel(weekWindow),
+      laytimeCountingFraction: laytimeStoredFractionNum(icLay.laytimeCountingFraction),
+      workableHatches: icLay.workableHatches ?? null,
+      totalHatches: icLay.totalHatches ?? null,
+      laytimeCountingFractionApplied: countingFracApplied
     };
 
     const excludedSet = parseExcludedWeekdays(contract?.excludedDays);
@@ -608,8 +612,85 @@ export class LaytimeCalculationService {
       };
     });
 
+    const excludedPersist = rows.reduce((s, r) => s + r.countingExcludedHours, 0);
     const timesheet: MotherLaytimeTimesheet = { contractSummary, rows };
 
-    return { statement: updated, breakdown, timesheet, dailyLedger };
+    const allowedNum = allowed ?? 0;
+    const balance = allowed !== null ? allowedNum - usedLaytimeTotal : null;
+    const dispatchHours = allowed !== null ? Math.max(0, allowedNum - usedLaytimeTotal) : 0;
+    const demurrageHours = allowed !== null ? Math.max(0, usedLaytimeTotal - allowedNum) : 0;
+
+    const demurrageAmount =
+      allowed !== null && demRate !== null && demurrageHours > 0
+        ? (demurrageHours / 24) * demRate
+        : null;
+    const dispatchAmount =
+      allowed !== null && disRate !== null && dispatchHours > 0
+        ? (dispatchHours / 24) * disRate
+        : null;
+    const netAmount =
+      demurrageAmount !== null || dispatchAmount !== null
+        ? (demurrageAmount ?? 0) - (dispatchAmount ?? 0)
+        : null;
+
+    const data: Prisma.StatementOfFactsUpdateInput = {
+      laytimeCommenceAt: commence,
+      laytimeUsedHours: new Prisma.Decimal(usedLaytimeTotal.toFixed(4)),
+      laytimeExcludedHours: new Prisma.Decimal(excludedPersist.toFixed(4)),
+      laytimeBalanceHours: balance !== null ? new Prisma.Decimal(balance.toFixed(4)) : null
+    };
+
+    if (allowedSource === "CONTRACT_DISCHARGE_RATE" && allowed !== null) {
+      data.laytimeAllowedHours = new Prisma.Decimal(allowedNum.toFixed(4));
+    }
+
+    if (demurrageAmount !== null) {
+      data.demurrageAmount = new Prisma.Decimal(demurrageAmount.toFixed(2));
+    } else {
+      data.demurrageAmount = null;
+    }
+    if (dispatchAmount !== null) {
+      data.dispatchAmount = new Prisma.Decimal(dispatchAmount.toFixed(2));
+    } else {
+      data.dispatchAmount = null;
+    }
+    if (netAmount !== null) {
+      data.netAmount = new Prisma.Decimal(netAmount.toFixed(2));
+    } else {
+      data.netAmount = null;
+    }
+
+    const updated = await this.prisma.statementOfFacts.update({
+      where: { id: statementId },
+      data
+    });
+
+    const breakdown: LaytimeBreakdown = {
+      commenceAt: commence.toISOString(),
+      allowedHours: allowed,
+      allowedSource,
+      usedHours: usedLaytimeTotal,
+      excludedHours: excludedPersist,
+      balanceHours: balance ?? 0,
+      demurrageHours,
+      dispatchHours,
+      demurrageAmount,
+      dispatchAmount,
+      netAmount,
+      currency
+    };
+
+    const remarkByEventId = new Map<string, string>();
+    for (const e of row.events) {
+      remarkByEventId.set(e.id, buildSofEventRemark(e));
+    }
+    const chronology = buildLaytimeChronology({
+      segments,
+      zone: resolvedZone,
+      allowedHours: allowed,
+      remarkByClosingEventId: remarkByEventId
+    });
+
+    return { statement: updated, breakdown, timesheet, dailyLedger, chronology };
   }
 }

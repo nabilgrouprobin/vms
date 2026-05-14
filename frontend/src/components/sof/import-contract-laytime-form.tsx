@@ -108,6 +108,91 @@ function humanizeWeekday(d: Weekday): string {
   return d.charAt(0) + d.slice(1).toLowerCase();
 }
 
+function LaytimeCountingFractionFields({
+  readOnly,
+  compact,
+  layFrac,
+  setLayFrac,
+  workableH,
+  setWorkableH,
+  totalH,
+  setTotalH,
+  preview
+}: {
+  readOnly: boolean;
+  compact: boolean;
+  layFrac: string;
+  setLayFrac: Dispatch<SetStateAction<string>>;
+  workableH: string;
+  setWorkableH: Dispatch<SetStateAction<string>>;
+  totalH: string;
+  setTotalH: Dispatch<SetStateAction<string>>;
+  preview: number | null;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-border/80 bg-muted/10",
+        compact ? "space-y-2 p-2" : "space-y-3 p-3"
+      )}
+    >
+      <p className={cn("font-medium text-foreground", compact ? "text-xs" : "text-sm")}>
+        Time counting fraction (Laytime2000)
+      </p>
+      <p className={cn("text-muted-foreground", compact ? "text-[10px] leading-snug" : "text-xs")}>
+        Optional multiplier on calendar-adjusted laytime hours. Explicit fraction overrides
+        workable ÷ total hatches. Per-event <span className="font-mono">laytimeImpactHours</span>{" "}
+        still skips this.
+      </p>
+      <div className={cn("grid sm:grid-cols-3", compact ? "gap-2" : "gap-3")}>
+        <div className={cn("space-y-1", compact && "space-y-0.5")}>
+          <Label className={compact ? "text-xs" : undefined}>Fraction (0–1)</Label>
+          <Input
+            className={compact ? "h-8 text-sm" : undefined}
+            disabled={readOnly}
+            value={layFrac}
+            onChange={(e) => setLayFrac(e.target.value)}
+            inputMode="decimal"
+            placeholder="e.g. 0.6"
+          />
+        </div>
+        <div className={cn("space-y-1", compact && "space-y-0.5")}>
+          <Label className={compact ? "text-xs" : undefined}>Workable hatches</Label>
+          <Input
+            className={compact ? "h-8 text-sm" : undefined}
+            disabled={readOnly}
+            value={workableH}
+            onChange={(e) => setWorkableH(e.target.value)}
+            inputMode="numeric"
+            placeholder="e.g. 5"
+          />
+        </div>
+        <div className={cn("space-y-1", compact && "space-y-0.5")}>
+          <Label className={compact ? "text-xs" : undefined}>Total hatches</Label>
+          <Input
+            className={compact ? "h-8 text-sm" : undefined}
+            disabled={readOnly}
+            value={totalH}
+            onChange={(e) => setTotalH(e.target.value)}
+            inputMode="numeric"
+            placeholder="e.g. 6"
+          />
+        </div>
+      </div>
+      {preview !== null ? (
+        <p className={cn("text-muted-foreground", compact ? "text-[10px]" : "text-xs")}>
+          <span className="font-medium text-foreground">Preview applied multiplier:</span>{" "}
+          {preview.toFixed(4).replace(/\.?0+$/, "")}
+        </p>
+      ) : (
+        <p className={cn("text-muted-foreground", compact ? "text-[10px]" : "text-xs")}>
+          Leave all empty for full 1.0 counting (no CP fraction).
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ImportContractWeekWindowFields({
   readOnly,
   compact,
@@ -235,6 +320,9 @@ export function ImportContractLaytimeForm({
   const [demRate, setDemRate] = useState("");
   const [disRate, setDisRate] = useState("");
   const [currency, setCurrency] = useState("");
+  const [layFrac, setLayFrac] = useState("");
+  const [workableH, setWorkableH] = useState("");
+  const [totalH, setTotalH] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   const [weekStartDay, setWeekStartDay] = useState<Weekday>("SUNDAY");
@@ -260,6 +348,9 @@ export function ImportContractLaytimeForm({
     setDemRate(c.laytimeDemurrageRatePerDay ?? "");
     setDisRate(c.laytimeDispatchRatePerDay ?? "");
     setCurrency(c.currency ?? "");
+    setLayFrac(c.laytimeCountingFraction ?? "");
+    setWorkableH(c.workableHatches != null ? String(c.workableHatches) : "");
+    setTotalH(c.totalHatches != null ? String(c.totalHatches) : "");
     const m = parseLaytimeWeekMarker(c.excludedTimePeriod);
     if (m) {
       setWeekStartDay(m.startDay);
@@ -289,8 +380,51 @@ export function ImportContractLaytimeForm({
     [weekStartDay, weekEndDay]
   );
 
+  const countingFracPreview = useMemo(() => {
+    const lf = layFrac.trim();
+    if (lf !== "") {
+      const n = parseFloat(lf.replace(",", "."));
+      if (Number.isFinite(n) && n > 0 && n <= 1) return n;
+      return null;
+    }
+    const wh = parseInt(workableH.trim(), 10);
+    const th = parseInt(totalH.trim(), 10);
+    if (!Number.isFinite(wh) || !Number.isFinite(th) || th <= 0 || wh < 0) return null;
+    return Math.min(1, wh / th);
+  }, [layFrac, workableH, totalH]);
+
   const mut = useMutation({
     mutationFn: async () => {
+      const lf = layFrac.trim();
+      let laytimeCountingFraction: number | null = null;
+      if (lf !== "") {
+        const n = parseFloat(lf.replace(",", "."));
+        if (!Number.isFinite(n) || n <= 0 || n > 1) {
+          throw new Error("Counting fraction must be a number between 0 and 1 (e.g. 0.6)");
+        }
+        laytimeCountingFraction = n;
+      }
+      const whs = workableH.trim();
+      const ths = totalH.trim();
+      if ((whs === "") !== (ths === "")) {
+        throw new Error("Set both workable hatches and total hatches, or leave both empty");
+      }
+      let workableHatches: number | null = null;
+      let totalHatches: number | null = null;
+      if (whs !== "") {
+        workableHatches = parseInt(whs, 10);
+        totalHatches = parseInt(ths, 10);
+        if (!Number.isFinite(workableHatches) || !Number.isFinite(totalHatches)) {
+          throw new Error("Hatch counts must be whole numbers");
+        }
+        if (totalHatches < 1) {
+          throw new Error("Total hatches must be at least 1");
+        }
+        if (workableHatches < 0 || workableHatches > totalHatches) {
+          throw new Error("Workable hatches must be between 0 and total hatches");
+        }
+      }
+
       const excludedDaysList = excludedDaysFromWorkSpan(weekStartDay, weekEndDay);
       const excludedTimePeriodPayload = buildLaytimeExcludedTimePeriod(
         weekStartDay,
@@ -309,6 +443,9 @@ export function ImportContractLaytimeForm({
         dischargeRateUnit: rateUnit.trim() || null,
         laytimeDemurrageRatePerDay: demRate === "" ? null : parseFloat(demRate),
         laytimeDispatchRatePerDay: disRate === "" ? null : parseFloat(disRate),
+        laytimeCountingFraction,
+        workableHatches,
+        totalHatches,
         currency: currency.trim() || null
       });
 
@@ -561,6 +698,17 @@ export function ImportContractLaytimeForm({
                     />
                   </div>
                 </div>
+                <LaytimeCountingFractionFields
+                  readOnly={readOnly}
+                  compact={embeddedCompact}
+                  layFrac={layFrac}
+                  setLayFrac={setLayFrac}
+                  workableH={workableH}
+                  setWorkableH={setWorkableH}
+                  totalH={totalH}
+                  setTotalH={setTotalH}
+                  preview={countingFracPreview}
+                />
                 <div className="flex items-center gap-2">
                   <input
                     id={`${formId}-hol-ex-emb`}
@@ -698,6 +846,30 @@ export function ImportContractLaytimeForm({
                   maxLength={8}
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Laytime time counting</CardTitle>
+              <CardDescription className="text-xs">
+                Matches Laytime2000-style <span className="font-medium">Frac</span> on port
+                chronology (after excluded weekdays / OODDA). Save, then recalculate laytime on the
+                SOF.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LaytimeCountingFractionFields
+                readOnly={readOnly}
+                compact={false}
+                layFrac={layFrac}
+                setLayFrac={setLayFrac}
+                workableH={workableH}
+                setWorkableH={setWorkableH}
+                totalH={totalH}
+                setTotalH={setTotalH}
+                preview={countingFracPreview}
+              />
             </CardContent>
           </Card>
         </>

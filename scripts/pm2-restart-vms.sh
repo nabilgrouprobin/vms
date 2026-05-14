@@ -17,10 +17,42 @@ FRONTEND_PORT=3000
 echo "[pm2-restart-vms] repo: $ROOT"
 echo "[pm2-restart-vms] backend=${BACKEND_PORT}, frontend=${FRONTEND_PORT}"
 
+# sudo -u user bash -l -c is non-interactive; .bashrc often skips NVM in that case.
+ensure_node_path() {
+  if command -v npm >/dev/null 2>&1 && command -v pm2 >/dev/null 2>&1; then
+    return 0
+  fi
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "$NVM_DIR/nvm.sh"
+  fi
+  if command -v npm >/dev/null 2>&1 && command -v pm2 >/dev/null 2>&1; then
+    return 0
+  fi
+  local latest
+  latest="$(find "${NVM_DIR:-$HOME/.nvm}/versions/node" -maxdepth 1 -type d -name 'v*' 2>/dev/null \
+    | sort -V | tail -1)"
+  if [[ -n "$latest" && -x "${latest}/bin/npm" ]]; then
+    PATH="${latest}/bin:$PATH"
+    export PATH
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "[pm2-restart-vms] ERROR: npm not in PATH. Install Node or NVM for user $(whoami)." >&2
+    exit 1
+  fi
+  if ! command -v pm2 >/dev/null 2>&1; then
+    echo "[pm2-restart-vms] ERROR: pm2 not in PATH. Run: npm install -g pm2 (as $(whoami))." >&2
+    exit 1
+  fi
+}
+
+ensure_node_path
+
 free_port() {
   local p="$1"
   if command -v fuser >/dev/null 2>&1; then
-    fuser -k "${p}/tcp" 2>/dev/null || true
+    fuser -k "${p}/tcp" >/dev/null 2>&1 || true
   fi
   if command -v lsof >/dev/null 2>&1; then
     for pid in $(lsof -t -iTCP:"${p}" -sTCP:LISTEN 2>/dev/null || true); do
@@ -60,7 +92,11 @@ if ! wait_for_port_free "$BACKEND_PORT" || ! wait_for_port_free "$FRONTEND_PORT"
   echo "[pm2-restart-vms] ERROR: one or more required ports are still busy."
   echo "  backend:${BACKEND_PORT} busy=$(port_busy "$BACKEND_PORT" && echo yes || echo no)"
   echo "  frontend:${FRONTEND_PORT} busy=$(port_busy "$FRONTEND_PORT" && echo yes || echo no)"
-  echo "Run once as root to force clear listeners:"
+  echo "If the frontend port keeps coming back, a supervisor is respawning Next (systemd, Docker, etc.):"
+  echo "  sudo ss -tlnp | grep ':${FRONTEND_PORT}\\|:${BACKEND_PORT}'"
+  echo "  sudo systemctl list-units --type=service --state=running"
+  echo "Then stop that unit (or ./deploy/restart-stack.sh retries kills as root for ~10s)."
+  echo "Or run once as root to force clear listeners:"
   echo "  fuser -k ${BACKEND_PORT}/tcp ${FRONTEND_PORT}/tcp"
   echo "Then rerun:"
   echo "  ./scripts/pm2-restart-vms.sh"

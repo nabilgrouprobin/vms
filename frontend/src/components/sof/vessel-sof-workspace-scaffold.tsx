@@ -289,6 +289,7 @@ function VesselSofWorkspaceScaffoldInner({
       }),
       { scroll: false }
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
   }, [
     kind,
     lighterCallId,
@@ -335,6 +336,7 @@ function VesselSofWorkspaceScaffoldInner({
         { scroll: false }
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
   }, [
     pickSofMode,
     kind,
@@ -370,6 +372,7 @@ function VesselSofWorkspaceScaffoldInner({
         { scroll: false }
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
   }, [
     pickSofMode,
     kind,
@@ -410,13 +413,11 @@ function VesselSofWorkspaceScaffoldInner({
     gcTime: 0
   });
 
-  const disambigRows = showLighterDisambig ? (lighterDisambigQ.data?.data ?? []) : [];
+  const disambigRows = lighterDisambigQ.data?.data ?? [];
 
   /** Only while picking among multiple lighter SOFs — avoids stale TanStack cache breaking peek/detail for mother or single-SOF lighter. */
-  const selectedRow = useMemo(() => {
-    if (!showLighterDisambig || !id) return null;
-    return disambigRows.find((r) => r.id === id) ?? null;
-  }, [showLighterDisambig, disambigRows, id]);
+  const selectedRow =
+    showLighterDisambig && id ? (disambigRows.find((r) => r.id === id) ?? null) : null;
 
   const motherPeekQ = useQuery({
     queryKey: ["mother-sof", id, "workspace-chip"],

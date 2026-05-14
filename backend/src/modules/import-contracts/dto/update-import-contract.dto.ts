@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 
 /** PATCH body for import contract operational / laytime fields */
 export class UpdateImportContractDto {
@@ -36,6 +36,25 @@ export class UpdateImportContractDto {
   @Type(() => Number)
   @IsNumber()
   laytimeDispatchRatePerDay?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  laytimeCountingFraction?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  workableHatches?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  totalHatches?: number | null;
 
   @IsOptional()
   @IsString()

@@ -214,6 +214,12 @@ export type MotherLaytimeContractSummary = {
   laytimeResolvedTimeZone: string;
   /** Contract contact window used for daily “Contract hrs” column */
   contractWeekLabel?: string;
+  /** CP explicit counting fraction (null if using hatch ratio only) */
+  laytimeCountingFraction?: number | null;
+  workableHatches?: number | null;
+  totalHatches?: number | null;
+  /** Multiplier applied after calendar (explicit or workable/total) */
+  laytimeCountingFractionApplied?: number | null;
 };
 
 export type MotherLaytimeTimesheetRow = {
@@ -253,6 +259,20 @@ export type MotherLaytimeDailyLedger = {
   totalDischargeQtyMt: number;
 };
 
+/** Laytime2000-style chronology row (day-split segment slice). */
+export type LaytimeChronologyRow = {
+  date: string;
+  weekday: string;
+  startLocalHm: string;
+  endLocalHm: string;
+  fraction: number;
+  remark: string;
+  toCountHours: number;
+  totalUsedHours: number;
+  onDemurrageHours: number;
+  closingEventId: string | null;
+};
+
 export type LaytimeRecalculateResult = {
   statement: unknown;
   breakdown: LaytimeBreakdown;
@@ -261,6 +281,7 @@ export type LaytimeRecalculateResult = {
 export type MotherLaytimeRecalculateResult = LaytimeRecalculateResult & {
   timesheet: MotherLaytimeTimesheet;
   dailyLedger: MotherLaytimeDailyLedger;
+  chronology: LaytimeChronologyRow[];
 };
 
 /** Lighter SOF laytime recalculation now returns the same shape as mother (contract + daily sheet). */

@@ -18,11 +18,14 @@ const importContractSelect = {
   dischargeRateUnit: true,
   laytimeDemurrageRatePerDay: true,
   laytimeDispatchRatePerDay: true,
+  laytimeCountingFraction: true,
+  workableHatches: true,
+  totalHatches: true,
   currency: true,
   dischargePort: true,
   lcEstablishByDate: true,
   contractDate: true
-} as const satisfies Prisma.ImportContractSelect;
+} as const;
 
 @Injectable()
 export class ImportContractsService {
@@ -31,7 +34,7 @@ export class ImportContractsService {
   async getById(id: string) {
     const row = await this.prisma.importContract.findFirst({
       where: { id, deletedAt: null },
-      select: importContractSelect
+      select: importContractSelect as unknown as Prisma.ImportContractSelect
     });
     if (!row) {
       throw new NotFoundException("Import contract was not found");
@@ -42,7 +45,7 @@ export class ImportContractsService {
   async update(id: string, dto: UpdateImportContractDto) {
     await this.getById(id);
 
-    const data: Prisma.ImportContractUpdateInput = {};
+    const data: Record<string, unknown> = {};
 
     if (dto.excludedDays !== undefined) {
       data.excludedDays = dto.excludedDays;
@@ -65,6 +68,15 @@ export class ImportContractsService {
     if (dto.laytimeDispatchRatePerDay !== undefined) {
       data.laytimeDispatchRatePerDay = toDecimalOrNull(dto.laytimeDispatchRatePerDay);
     }
+    if (dto.laytimeCountingFraction !== undefined) {
+      data.laytimeCountingFraction = toDecimalOrNull(dto.laytimeCountingFraction);
+    }
+    if (dto.workableHatches !== undefined) {
+      data.workableHatches = dto.workableHatches;
+    }
+    if (dto.totalHatches !== undefined) {
+      data.totalHatches = dto.totalHatches;
+    }
     if (dto.currency !== undefined) {
       data.currency = dto.currency;
     }
@@ -75,14 +87,14 @@ export class ImportContractsService {
     if (Object.keys(data).length === 0) {
       return this.prisma.importContract.findUniqueOrThrow({
         where: { id },
-        select: importContractSelect
+        select: importContractSelect as unknown as Prisma.ImportContractSelect
       });
     }
 
     return this.prisma.importContract.update({
       where: { id },
-      data,
-      select: importContractSelect
+      data: data as Prisma.ImportContractUpdateInput,
+      select: importContractSelect as unknown as Prisma.ImportContractSelect
     });
   }
 }
