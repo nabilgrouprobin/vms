@@ -13,14 +13,24 @@ import {
   resolveLaytimeCountingFractionFromContract
 } from "./laytime-counting-fraction";
 import { accumulateLaytimeSegmentsFromEvents } from "./laytime-event-accumulation";
+import { reduceSegmentsForHolidayWallOverlap } from "./laytime-holiday-mask";
 import {
   buildMotherLaytimeDailyLedger,
   formatContractWeekWindowLabel,
+  mergeExcludedWeekdayLists,
   parseContractWeekWindow,
+  resolveLaytimeWeekCalendar,
+  sofLaytimeWeekCalendarSource,
   type MotherLaytimeDailyLedger
 } from "./laytime-mother-daily-ledger";
+import { resolveCommenceFromNorTendered } from "./laytime-nor-commence";
+import { loadSofLaytimeWeekFields } from "./sof-laytime-week.persistence";
 
-export type LaytimeAllowedSource = "CONTRACT_DISCHARGE_RATE" | "STATEMENT_MANUAL" | "NONE";
+export type LaytimeAllowedSource =
+  | "CONTRACT_DISCHARGE_RATE"
+  | "STATEMENT_DISCHARGE_RATE"
+  | "STATEMENT_MANUAL"
+  | "NONE";
 
 export type LaytimeBreakdown = {
   commenceAt: string;
@@ -39,6 +49,10 @@ export type LaytimeBreakdown = {
 
 export type MotherLaytimeContractSummary = {
   cargoQtyMt: number | null;
+  /** Total vessel-call cargo (MT) for partial % display */
+  totalCargoQtyMt: number | null;
+  /** SOF partial cargo (MT) when set for allowance */
+  partialCargoQtyMt: number | null;
   dischargeRateMtPerDay: number | null;
   dischargeRateUnit: string | null;
   allowedHours: number | null;
@@ -180,10 +194,11 @@ export class LaytimeCalculationService {
     const row = await this.prisma.statementOfFacts.findFirst({
       where: { id: statementId, scope: SOFScope.MOTHER_VESSEL },
       include: {
+        laytimeHolidays: { orderBy: [{ sortOrder: "asc" }, { holidayStartAt: "asc" }] },
         events: {
           orderBy: [{ eventTime: "asc" }, { id: "asc" }],
           include: {
-            eventTypeDefinition: { select: { name: true } }
+            eventTypeDefinition: { select: { name: true, category: true } }
           }
         },
         vesselCall: {
@@ -208,29 +223,37 @@ export class LaytimeCalculationService {
     }
 
     const vc = row.vesselCall;
-    const commence =
-      vc.laytimeCommenceAt ??
-      vc.norAcceptedAt ??
-      vc.norTenderedAt ??
-      row.events[0]?.eventTime ??
-      row.startedAt;
+    let commence: Date | null = null;
+    if (vc.norTenderedAt) {
+      commence = resolveCommenceFromNorTendered(vc.norTenderedAt, vc.laytimeTimeZone);
+    } else if (vc.laytimeCommenceAt) {
+      commence = vc.laytimeCommenceAt;
+    } else {
+      commence = vc.norAcceptedAt ?? row.events[0]?.eventTime ?? row.startedAt ?? null;
+    }
 
     if (!commence) {
       throw new BadRequestException(
-        "Cannot determine laytime commence: set vessel call laytime / NOR times or add at least one event"
+        "Cannot determine laytime commence: set vessel call laytime commence / NOR tendered, or add at least one event"
       );
     }
 
     const contract = vc.importContract;
-    const qty = num(vc.approxTotalWeightTon);
-    const rate = num(contract?.dischargeRateMtPerDay);
+    const totalCargoMt = num(vc.approxTotalWeightTon);
+    const partialMt = num(row.laytimePartialCargoMt);
+    const qty =
+      partialMt !== null && partialMt > 0 ? partialMt : totalCargoMt;
+    const contractRate = num(contract?.dischargeRateMtPerDay);
+    const statementRate = num(row.laytimeDischargeRateMtPerDay);
+    const rate = contractRate ?? statementRate;
 
     let allowed: number | null = num(row.laytimeAllowedHours);
     let allowedSource: LaytimeAllowedSource = "STATEMENT_MANUAL";
 
-    if (contract && qty !== null && qty > 0 && rate !== null && rate > 0) {
+    if (qty !== null && qty > 0 && rate !== null && rate > 0) {
       allowed = (qty / rate) * 24;
-      allowedSource = "CONTRACT_DISCHARGE_RATE";
+      allowedSource =
+        contractRate != null ? "CONTRACT_DISCHARGE_RATE" : "STATEMENT_DISCHARGE_RATE";
     } else if (allowed === null || allowed <= 0) {
       allowed = null;
       allowedSource = "NONE";
@@ -246,11 +269,30 @@ export class LaytimeCalculationService {
       commence
     );
 
+    const holidayIntervals =
+      row.laytimeHolidays?.map((h) => ({
+        holidayStartAt: h.holidayStartAt,
+        holidayEndAt: h.holidayEndAt
+      })) ?? [];
     const eventById = new Map(row.events.map((e) => [e.id, e]));
+    const weekFromDb = await loadSofLaytimeWeekFields(this.prisma, statementId);
+    const weekCalendar = resolveLaytimeWeekCalendar(sofLaytimeWeekCalendarSource(weekFromDb), contract);
+    const resolvedZone = resolveLaytimeZone(vc.laytimeTimeZone);
+    const weekWindow = parseContractWeekWindow(
+      weekCalendar.excludedTimePeriod,
+      weekCalendar.excludedDays
+    );
+    const excludedForEngine = mergeExcludedWeekdayLists(weekWindow, weekCalendar.excludedDays);
     const { segments: calendarSegments } = applyImportContractCalendarToMotherSegments(
       raw.segments,
       eventById,
-      contract?.excludedDays,
+      excludedForEngine,
+      vc.laytimeTimeZone,
+      allowed
+    );
+    const segmentsAfterHoliday = reduceSegmentsForHolidayWallOverlap(
+      calendarSegments,
+      holidayIntervals,
       vc.laytimeTimeZone,
       allowed
     );
@@ -258,27 +300,35 @@ export class LaytimeCalculationService {
       importContractLaytimeSlice(contract)
     );
     const segments = applyLaytimeCountingFractionToSegments(
-      calendarSegments,
+      segmentsAfterHoliday,
       countingFracApplied,
       eventById
-    );
-
-    const resolvedZone = resolveLaytimeZone(vc.laytimeTimeZone);
-    const weekWindow = parseContractWeekWindow(
-      contract?.excludedTimePeriod ?? null,
-      contract?.excludedDays ?? []
     );
     const segmentCountingUsedHours = segments.map((seg) =>
       seg.countsAsLaytime ? seg.countingHours : 0
     );
 
+    const segmentClosingCategories = segments.map((seg) => {
+      const ev = seg.closingEventId ? eventById.get(seg.closingEventId) : undefined;
+      return ev?.eventTypeDefinition?.category ?? "NORMAL";
+    });
+
+    const operationsEndAt =
+      row.completedAt ??
+      (segments.length > 0 ? segments[segments.length - 1]!.periodTo : null);
+
     const dailyLedger = buildMotherLaytimeDailyLedger({
       commenceAt: commence,
+      norTenderedAt: vc.norTenderedAt,
+      operationsEndAt,
       zone: resolvedZone,
       week: weekWindow,
+      excludedWeekdays: excludedForEngine,
+      holidays: holidayIntervals,
       freeTimeHours: allowed,
       segments,
       segmentCountingUsedHours,
+      segmentClosingCategories,
       dailyDischarges: vc.dailyDischarges ?? [],
       events: row.events.map((e) => ({
         eventTime: e.eventTime,
@@ -287,7 +337,8 @@ export class LaytimeCalculationService {
       }))
     });
 
-    const usedLaytimeTotal = dailyLedger.totalWorkingHour;
+    const usedLaytimeTotal =
+      dailyLedger.totalToCountHour ?? dailyLedger.totalCreditedLaytimeHour;
 
     const demRate = num(contract?.laytimeDemurrageRatePerDay);
     const disRate = num(contract?.laytimeDispatchRatePerDay);
@@ -296,6 +347,8 @@ export class LaytimeCalculationService {
     const icLay = importContractLaytimeSlice(contract);
     const contractSummary: MotherLaytimeContractSummary = {
       cargoQtyMt: qty,
+      totalCargoQtyMt: totalCargoMt,
+      partialCargoQtyMt: partialMt !== null && partialMt > 0 ? partialMt : null,
       dischargeRateMtPerDay: rate,
       dischargeRateUnit: contract?.dischargeRateUnit ?? null,
       allowedHours: allowed,
@@ -303,7 +356,7 @@ export class LaytimeCalculationService {
       laytimeDemurrageRatePerDay: demRate,
       laytimeDispatchRatePerDay: disRate,
       currency,
-      excludedDays: contract?.excludedDays ?? [],
+      excludedDays: weekCalendar.excludedDays,
       holidaysExcluded: contract?.holidaysExcluded ?? null,
       laytimeTimeZoneRaw: vc.laytimeTimeZone ?? null,
       laytimeResolvedTimeZone: resolvedZone,
@@ -314,7 +367,7 @@ export class LaytimeCalculationService {
       laytimeCountingFractionApplied: countingFracApplied
     };
 
-    const excludedSet = parseExcludedWeekdays(contract?.excludedDays);
+    const excludedSet = parseExcludedWeekdays(excludedForEngine);
     const rows: MotherLaytimeTimesheetRow[] = segments.map((seg) => {
       const ev = seg.closingEventId ? eventById.get(seg.closingEventId) : undefined;
       const impact = ev ? num(ev.laytimeImpactHours) : null;
@@ -348,9 +401,10 @@ export class LaytimeCalculationService {
     const timesheet: MotherLaytimeTimesheet = { contractSummary, rows };
 
     const allowedNum = allowed ?? 0;
-    const balance = allowed !== null ? allowedNum - usedLaytimeTotal : null;
-    const dispatchHours = allowed !== null ? Math.max(0, allowedNum - usedLaytimeTotal) : 0;
-    const demurrageHours = allowed !== null ? Math.max(0, usedLaytimeTotal - allowedNum) : 0;
+    const balance =
+      allowed !== null ? allowedNum - usedLaytimeTotal : null;
+    const dispatchHours = dailyLedger.totalDespatchHour;
+    const demurrageHours = dailyLedger.totalDemurrageHour;
 
     const demurrageAmount =
       allowed !== null && demRate !== null && demurrageHours > 0
@@ -437,10 +491,11 @@ export class LaytimeCalculationService {
     const row = await this.prisma.statementOfFacts.findFirst({
       where: { id: statementId, scope: SOFScope.LIGHTER_VESSEL },
       include: {
+        laytimeHolidays: { orderBy: [{ sortOrder: "asc" }, { holidayStartAt: "asc" }] },
         events: {
           orderBy: [{ eventTime: "asc" }, { id: "asc" }],
           include: {
-            eventTypeDefinition: { select: { name: true } }
+            eventTypeDefinition: { select: { name: true, category: true } }
           }
         },
         lighterTrip: {
@@ -490,15 +545,21 @@ export class LaytimeCalculationService {
     }
 
     const contract = vc.importContract;
-    const qty = resolveLighterTripCargoMt(trip);
-    const rate = num(contract?.dischargeRateMtPerDay);
+    const tripTotalMt = resolveLighterTripCargoMt(trip);
+    const partialMtL = num(row.laytimePartialCargoMt);
+    const qty =
+      partialMtL !== null && partialMtL > 0 ? partialMtL : tripTotalMt;
+    const contractRate = num(contract?.dischargeRateMtPerDay);
+    const statementRate = num(row.laytimeDischargeRateMtPerDay);
+    const rate = contractRate ?? statementRate;
 
     let allowed: number | null = num(row.laytimeAllowedHours);
     let allowedSource: LaytimeAllowedSource = "STATEMENT_MANUAL";
 
-    if (contract && qty !== null && qty > 0 && rate !== null && rate > 0) {
+    if (qty !== null && qty > 0 && rate !== null && rate > 0) {
       allowed = (qty / rate) * 24;
-      allowedSource = "CONTRACT_DISCHARGE_RATE";
+      allowedSource =
+        contractRate != null ? "CONTRACT_DISCHARGE_RATE" : "STATEMENT_DISCHARGE_RATE";
     } else if (allowed === null || allowed <= 0) {
       allowed = null;
       allowedSource = "NONE";
@@ -514,11 +575,30 @@ export class LaytimeCalculationService {
       commence
     );
 
+    const holidayIntervals =
+      row.laytimeHolidays?.map((h) => ({
+        holidayStartAt: h.holidayStartAt,
+        holidayEndAt: h.holidayEndAt
+      })) ?? [];
     const eventById = new Map(row.events.map((e) => [e.id, e]));
+    const weekFromDb = await loadSofLaytimeWeekFields(this.prisma, statementId);
+    const weekCalendar = resolveLaytimeWeekCalendar(sofLaytimeWeekCalendarSource(weekFromDb), contract);
+    const resolvedZone = resolveLaytimeZone(vc.laytimeTimeZone);
+    const weekWindow = parseContractWeekWindow(
+      weekCalendar.excludedTimePeriod,
+      weekCalendar.excludedDays
+    );
+    const excludedForEngine = mergeExcludedWeekdayLists(weekWindow, weekCalendar.excludedDays);
     const { segments: calendarSegments } = applyImportContractCalendarToMotherSegments(
       raw.segments,
       eventById,
-      contract?.excludedDays,
+      excludedForEngine,
+      vc.laytimeTimeZone,
+      allowed
+    );
+    const segmentsAfterHoliday = reduceSegmentsForHolidayWallOverlap(
+      calendarSegments,
+      holidayIntervals,
       vc.laytimeTimeZone,
       allowed
     );
@@ -526,27 +606,35 @@ export class LaytimeCalculationService {
       importContractLaytimeSlice(contract)
     );
     const segments = applyLaytimeCountingFractionToSegments(
-      calendarSegments,
+      segmentsAfterHoliday,
       countingFracApplied,
       eventById
-    );
-
-    const resolvedZone = resolveLaytimeZone(vc.laytimeTimeZone);
-    const weekWindow = parseContractWeekWindow(
-      contract?.excludedTimePeriod ?? null,
-      contract?.excludedDays ?? []
     );
     const segmentCountingUsedHours = segments.map((seg) =>
       seg.countsAsLaytime ? seg.countingHours : 0
     );
 
+    const segmentClosingCategories = segments.map((seg) => {
+      const ev = seg.closingEventId ? eventById.get(seg.closingEventId) : undefined;
+      return ev?.eventTypeDefinition?.category ?? "NORMAL";
+    });
+
+    const operationsEndAt =
+      row.completedAt ??
+      (segments.length > 0 ? segments[segments.length - 1]!.periodTo : null);
+
     const dailyLedger = buildMotherLaytimeDailyLedger({
       commenceAt: commence,
+      norTenderedAt: vc.norTenderedAt,
+      operationsEndAt,
       zone: resolvedZone,
       week: weekWindow,
+      excludedWeekdays: excludedForEngine,
+      holidays: holidayIntervals,
       freeTimeHours: allowed,
       segments,
       segmentCountingUsedHours,
+      segmentClosingCategories,
       dailyDischarges: [],
       events: row.events.map((e) => ({
         eventTime: e.eventTime,
@@ -555,7 +643,8 @@ export class LaytimeCalculationService {
       }))
     });
 
-    const usedLaytimeTotal = dailyLedger.totalWorkingHour;
+    const usedLaytimeTotal =
+      dailyLedger.totalToCountHour ?? dailyLedger.totalCreditedLaytimeHour;
 
     const demRate = num(contract?.laytimeDemurrageRatePerDay);
     const disRate = num(contract?.laytimeDispatchRatePerDay);
@@ -564,6 +653,9 @@ export class LaytimeCalculationService {
     const icLay = importContractLaytimeSlice(contract);
     const contractSummary: MotherLaytimeContractSummary = {
       cargoQtyMt: qty,
+      totalCargoQtyMt: tripTotalMt,
+      partialCargoQtyMt:
+        partialMtL !== null && partialMtL > 0 ? partialMtL : null,
       dischargeRateMtPerDay: rate,
       dischargeRateUnit: contract?.dischargeRateUnit ?? null,
       allowedHours: allowed,
@@ -571,7 +663,7 @@ export class LaytimeCalculationService {
       laytimeDemurrageRatePerDay: demRate,
       laytimeDispatchRatePerDay: disRate,
       currency,
-      excludedDays: contract?.excludedDays ?? [],
+      excludedDays: weekCalendar.excludedDays,
       holidaysExcluded: contract?.holidaysExcluded ?? null,
       laytimeTimeZoneRaw: vc.laytimeTimeZone ?? null,
       laytimeResolvedTimeZone: resolvedZone,
@@ -582,7 +674,7 @@ export class LaytimeCalculationService {
       laytimeCountingFractionApplied: countingFracApplied
     };
 
-    const excludedSet = parseExcludedWeekdays(contract?.excludedDays);
+    const excludedSet = parseExcludedWeekdays(excludedForEngine);
     const rows: MotherLaytimeTimesheetRow[] = segments.map((seg) => {
       const ev = seg.closingEventId ? eventById.get(seg.closingEventId) : undefined;
       const impact = ev ? num(ev.laytimeImpactHours) : null;
@@ -616,9 +708,10 @@ export class LaytimeCalculationService {
     const timesheet: MotherLaytimeTimesheet = { contractSummary, rows };
 
     const allowedNum = allowed ?? 0;
-    const balance = allowed !== null ? allowedNum - usedLaytimeTotal : null;
-    const dispatchHours = allowed !== null ? Math.max(0, allowedNum - usedLaytimeTotal) : 0;
-    const demurrageHours = allowed !== null ? Math.max(0, usedLaytimeTotal - allowedNum) : 0;
+    const balance =
+      allowed !== null ? allowedNum - usedLaytimeTotal : null;
+    const dispatchHours = dailyLedger.totalDespatchHour;
+    const demurrageHours = dailyLedger.totalDemurrageHour;
 
     const demurrageAmount =
       allowed !== null && demRate !== null && demurrageHours > 0

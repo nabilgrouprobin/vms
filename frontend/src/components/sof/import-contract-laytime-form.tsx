@@ -8,6 +8,7 @@ import { useEffect, useId, useMemo, useState, type Dispatch, type SetStateAction
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { SofTime24Input } from "@/components/sof/sof-local-datetime-inputs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDt } from "@/lib/format";
@@ -18,94 +19,22 @@ import { toast } from "@/lib/toast";
 import { patchVesselCall } from "@/lib/vessel-calls-api";
 import { vesselSofWorkspacePath } from "@/lib/workspace-paths";
 import { cn } from "@/lib/utils";
+import {
+  buildLaytimeExcludedTimePeriod,
+  excludedDaysFromWorkSpan,
+  humanizeLaytimeWeekday,
+  LAYTIME_WEEKDAYS,
+  parseLaytimeWeekMarker,
+  stripLaytimeWeekFirstLine,
+  workSpanFromExcludedDaysList,
+  type LaytimeWeekday
+} from "@/lib/laytime-week-marker";
 
-const WEEKDAYS = [
-  "SUNDAY",
-  "MONDAY",
-  "TUESDAY",
-  "WEDNESDAY",
-  "THURSDAY",
-  "FRIDAY",
-  "SATURDAY"
-] as const;
-
-type Weekday = (typeof WEEKDAYS)[number];
-
-const LAYTIME_WEEK_MARKER =
-  /^__LAYTIME_WEEK__\s+(SUNDAY|MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY)\s+(\d{2}:\d{2})\s+(SUNDAY|MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY)\s+(\d{2}:\d{2})$/i;
-
-function parseLaytimeWeekMarker(raw: string | null | undefined): {
-  startDay: Weekday;
-  startTime: string;
-  endDay: Weekday;
-  endTime: string;
-  notes: string;
-} | null {
-  if (!raw?.trim()) return null;
-  const first = raw.split("\n")[0]?.trim() ?? "";
-  const m = first.match(LAYTIME_WEEK_MARKER);
-  if (!m) return null;
-  return {
-    startDay: m[1].toUpperCase() as Weekday,
-    startTime: m[2],
-    endDay: m[3].toUpperCase() as Weekday,
-    endTime: m[4],
-    notes: raw.split("\n").slice(1).join("\n").trim()
-  };
-}
-
-function stripLaytimeWeekFirstLine(raw: string | null | undefined): string {
-  if (!raw?.trim()) return "";
-  const first = raw.split("\n")[0]?.trim() ?? "";
-  if (LAYTIME_WEEK_MARKER.test(first)) {
-    return raw.split("\n").slice(1).join("\n").trim();
-  }
-  return raw.trim();
-}
-
-function buildLaytimeExcludedTimePeriod(
-  startDay: Weekday,
-  startTime: string,
-  endDay: Weekday,
-  endTime: string,
-  notes: string
-): string | null {
-  const line = `__LAYTIME_WEEK__ ${startDay} ${startTime} ${endDay} ${endTime}`;
-  const n = notes.trim();
-  if (!n) return line;
-  return `${line}\n${n}`;
-}
-
-function dayIndex(d: Weekday): number {
-  return WEEKDAYS.indexOf(d);
-}
-
-/** Workdays from start through end inclusive (forward on the week circle). */
-function excludedDaysFromWorkSpan(startDay: Weekday, endDay: Weekday): Weekday[] {
-  const si = dayIndex(startDay);
-  const ei = dayIndex(endDay);
-  if (si < 0 || ei < 0) return [...WEEKDAYS];
-  const work = new Set<number>();
-  let d = si;
-  work.add(d);
-  let guard = 0;
-  while (d !== ei && guard < 8) {
-    d = (d + 1) % 7;
-    work.add(d);
-    guard++;
-  }
-  return WEEKDAYS.filter((_, i) => !work.has(i)) as Weekday[];
-}
-
-function workSpanFromExcludedDaysList(days: string[]): { start: Weekday; end: Weekday } {
-  const ex = new Set(days.map((x) => x.trim().toUpperCase()));
-  const work = WEEKDAYS.filter((d) => !ex.has(d));
-  if (work.length === 0) return { start: "MONDAY", end: "FRIDAY" };
-  return { start: work[0], end: work[work.length - 1] };
-}
+const WEEKDAYS = LAYTIME_WEEKDAYS;
+type Weekday = LaytimeWeekday;
 
 function humanizeWeekday(d: Weekday): string {
-  return d.charAt(0) + d.slice(1).toLowerCase();
+  return humanizeLaytimeWeekday(d);
 }
 
 function LaytimeCountingFractionFields({
@@ -193,7 +122,7 @@ function LaytimeCountingFractionFields({
   );
 }
 
-function ImportContractWeekWindowFields({
+export function ImportContractWeekWindowFields({
   readOnly,
   compact,
   weekStartDay,
@@ -207,12 +136,12 @@ function ImportContractWeekWindowFields({
 }: {
   readOnly: boolean;
   compact: boolean;
-  weekStartDay: Weekday;
-  setWeekStartDay: Dispatch<SetStateAction<Weekday>>;
+  weekStartDay: LaytimeWeekday;
+  setWeekStartDay: Dispatch<SetStateAction<LaytimeWeekday>>;
   weekStartTime: string;
   setWeekStartTime: Dispatch<SetStateAction<string>>;
-  weekEndDay: Weekday;
-  setWeekEndDay: Dispatch<SetStateAction<Weekday>>;
+  weekEndDay: LaytimeWeekday;
+  setWeekEndDay: Dispatch<SetStateAction<LaytimeWeekday>>;
   weekEndTime: string;
   setWeekEndTime: Dispatch<SetStateAction<string>>;
 }) {
@@ -228,7 +157,7 @@ function ImportContractWeekWindowFields({
             )}
             disabled={readOnly}
             value={weekStartDay}
-            onChange={(e) => setWeekStartDay(e.target.value as Weekday)}
+            onChange={(e) => setWeekStartDay(e.target.value as LaytimeWeekday)}
           >
             {WEEKDAYS.map((d) => (
               <option key={d} value={d}>
@@ -237,12 +166,12 @@ function ImportContractWeekWindowFields({
             ))}
           </select>
           <span className="text-muted-foreground">—</span>
-          <Input
-            type="time"
-            className="w-[7.5rem]"
+          <SofTime24Input
+            className="h-8 w-[7.5rem] text-[11px]"
             disabled={readOnly}
             value={weekStartTime}
-            onChange={(e) => setWeekStartTime(e.target.value)}
+            onChange={setWeekStartTime}
+            aria-label="Week start time, 24-hour HH:mm"
           />
         </div>
       </div>
@@ -256,7 +185,7 @@ function ImportContractWeekWindowFields({
             )}
             disabled={readOnly}
             value={weekEndDay}
-            onChange={(e) => setWeekEndDay(e.target.value as Weekday)}
+            onChange={(e) => setWeekEndDay(e.target.value as LaytimeWeekday)}
           >
             {WEEKDAYS.map((d) => (
               <option key={d} value={d}>
@@ -265,12 +194,12 @@ function ImportContractWeekWindowFields({
             ))}
           </select>
           <span className="text-muted-foreground">—</span>
-          <Input
-            type="time"
-            className="w-[7.5rem]"
+          <SofTime24Input
+            className="h-8 w-[7.5rem] text-[11px]"
             disabled={readOnly}
             value={weekEndTime}
-            onChange={(e) => setWeekEndTime(e.target.value)}
+            onChange={setWeekEndTime}
+            aria-label="Week end time, 24-hour HH:mm"
           />
         </div>
       </div>
@@ -289,6 +218,10 @@ export type ImportContractLaytimeFormProps = {
   embedded?: boolean;
   /** Tighter spacing on laytime tab (narrow sidebar). */
   embeddedCompact?: boolean;
+  /** When false, cargo/rate fields are omitted (use SofLaytimeCargoSidebarCard). */
+  showCargoFields?: boolean;
+  /** When false, week fields are omitted (use SofLaytimeWeekWindowForm on the calculation page). */
+  showWeekFields?: boolean;
   onSaved?: () => void;
   onUnlinked?: () => void;
 };
@@ -300,6 +233,8 @@ export function ImportContractLaytimeForm({
   vesselCallApproxTotalWeightTon,
   embedded = false,
   embeddedCompact = false,
+  showCargoFields = true,
+  showWeekFields = true,
   onSaved,
   onUnlinked
 }: ImportContractLaytimeFormProps) {
@@ -449,7 +384,7 @@ export function ImportContractLaytimeForm({
         currency: currency.trim() || null
       });
 
-      if (embedded && vesselCallId) {
+      if (embedded && vesselCallId && showCargoFields) {
         const t = cargoMt.trim();
         const w = t === "" ? null : parseFloat(t.replace(",", "."));
         if (w !== null && !Number.isFinite(w)) {
@@ -560,12 +495,28 @@ export function ImportContractLaytimeForm({
         <Card>
           <CardHeader className={embeddedCompact ? "space-y-0.5 py-2 pb-0" : "pb-3"}>
             <CardTitle className={embeddedCompact ? "text-sm" : "text-base"}>
-              Working week &amp; cargo
+              {showCargoFields && showWeekFields
+                ? "Working week & cargo"
+                : showWeekFields
+                  ? "Working week"
+                  : showCargoFields
+                    ? "Cargo"
+                    : "Other contract terms"}
             </CardTitle>
             {embeddedCompact ? (
               <CardDescription className="text-[10px] leading-snug">
-                Week + cargo → save, then{" "}
-                <span className="font-medium text-foreground">Recalculate</span> on the sheet.
+                {showCargoFields || showWeekFields ? (
+                  <>
+                    {showWeekFields && showCargoFields
+                      ? "Week + cargo → save, then "
+                      : showWeekFields
+                        ? "Week window → save, then "
+                        : "Cargo → save, then "}
+                    <span className="font-medium text-foreground">Recalculate</span> on the sheet.
+                  </>
+                ) : (
+                  "Week and cargo are on the laytime calculation sheet. Expand below for demurrage, dispatch, and notes."
+                )}
               </CardDescription>
             ) : (
               <CardDescription className="text-xs">
@@ -579,18 +530,22 @@ export function ImportContractLaytimeForm({
             )}
           </CardHeader>
           <CardContent className={embeddedCompact ? "space-y-3 pt-2" : "space-y-5"}>
-            <ImportContractWeekWindowFields
-              readOnly={readOnly}
-              compact={embeddedCompact}
-              weekStartDay={weekStartDay}
-              setWeekStartDay={setWeekStartDay}
-              weekStartTime={weekStartTime}
-              setWeekStartTime={setWeekStartTime}
-              weekEndDay={weekEndDay}
-              setWeekEndDay={setWeekEndDay}
-              weekEndTime={weekEndTime}
-              setWeekEndTime={setWeekEndTime}
-            />
+            {showWeekFields ? (
+              <ImportContractWeekWindowFields
+                readOnly={readOnly}
+                compact={embeddedCompact}
+                weekStartDay={weekStartDay}
+                setWeekStartDay={setWeekStartDay}
+                weekStartTime={weekStartTime}
+                setWeekStartTime={setWeekStartTime}
+                weekEndDay={weekEndDay}
+                setWeekEndDay={setWeekEndDay}
+                weekEndTime={weekEndTime}
+                setWeekEndTime={setWeekEndTime}
+              />
+            ) : null}
+            {showCargoFields ? (
+              <>
             <div className={cn("grid sm:grid-cols-2", embeddedCompact ? "gap-2" : "gap-4")}>
               <div className={cn("space-y-2", embeddedCompact && "space-y-1")}>
                 <Label className={embeddedCompact ? "text-xs" : undefined}>Total amount (MT)</Label>
@@ -646,6 +601,8 @@ export function ImportContractLaytimeForm({
                 and hours.
               </p>
             )}
+              </>
+            ) : null}
 
             <Collapsible>
               <CollapsibleTrigger asChild>

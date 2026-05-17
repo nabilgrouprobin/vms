@@ -48,13 +48,17 @@ export function patchVesselCall(
     laytimeTimeZone?: string | null;
     /** Link an import contract to this mother vessel call, or null to unlink. */
     importContractId?: string | null;
-    /** Total cargo quantity (MT) for laytime / discharge planning. */
+    /** Approximate total cargo (MT) on the call — drives contract laytime when discharge rate is set. */
     approxTotalWeightTon?: number | null;
     status?: string;
     callNo?: string;
     cargoNameSnapshot?: string | null;
     /** ISO 8601, or null to clear ETA. */
     eta?: string | null;
+    /** ISO 8601, or null to clear NOR tendered. */
+    norTenderedAt?: string | null;
+    /** ISO 8601, or null to clear NOR accepted. */
+    norAcceptedAt?: string | null;
   }
 ) {
   return api<unknown>(`/vessel-calls/${id}`, {

@@ -1,3 +1,5 @@
+import { formatLaytimeHoursAndMinutes } from "@/lib/laytime-hours-format";
+
 /** Shared formatters for mother / lighter SOF panels. */
 
 export function approxOutstandingMt(
@@ -20,6 +22,7 @@ export function hoursRelativeToNow(iso: string | null | undefined): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return "—";
   const h = (t - Date.now()) / 3_600_000;
-  if (h >= 0) return `${h.toFixed(1)} h until`;
-  return `${Math.abs(h).toFixed(1)} h ago`;
+  const label = formatLaytimeHoursAndMinutes(Math.abs(h));
+  if (h >= 0) return `${label} until`;
+  return `${label} ago`;
 }

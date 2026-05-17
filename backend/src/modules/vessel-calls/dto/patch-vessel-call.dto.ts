@@ -49,5 +49,11 @@ export class PatchVesselCallDto {
   @ValidateIf((_, v) => v !== null && v !== undefined)
   @IsString()
   @MaxLength(80)
-  eta?: string | null;
+  norTenderedAt?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsString()
+  @MaxLength(80)
+  norAcceptedAt?: string | null;
 }

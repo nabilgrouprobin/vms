@@ -1,0 +1,2283 @@
+Complete Project Plan: Interactive Laytime & Demurrage Calculator
+PART 1: SYSTEM ARCHITECTURE PLAN
+Core Components
+text
+
+┌─────────────────────────────────────────────────────────────┐
+│                     INPUT LAYER                              │
+├─────────────────────────────────────────────────────────────┤
+│ • Voyage Setup Form                                          │
+│ • SOF Event Entry Form                                       │
+│ • Holiday Management CRUD                                    │
+│ • Rules Configuration (Weekends, Working Hours)              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   CALCULATION ENGINE                         │
+├─────────────────────────────────────────────────────────────┤
+│ • Laytime Allowed Calculator                                 │
+│ • Laytime Used Calculator (with exclusions)                  │
+│ • Demurrage/Despatch Calculator                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    OUTPUT LAYER                              │
+├─────────────────────────────────────────────────────────────┤
+│ • SOF Summary Sheet                                          │
+│ • Laytime Calculation Sheet                                  │
+│ • Demurrage Invoice Summary                                  │
+└─────────────────────────────────────────────────────────────┘
+
+Data Flow
+text
+
+NOR Tendered ──┐
+               ├──► Laytime Clock Start ──┐
+Holidays ──────┤                          │
+               │                          ▼
+Weekend Rules ─┼──────────────────► Running Time Calculation
+               │                          │
+Event Factors ─┤                          ▼
+               │                    Used Time vs Allowed Time
+Port Activity ─┘                          │
+                                           ▼
+                                   Demurrage/Despatch
+
+PART 2: SOF SUMMARY SHEET (Template)
+SOF Header Information
+Field	Value	Source
+Vessel Name	M.V. TOMAROS	User Input
+IMO	9867059	User Input
+Port	CHITTAGONG, BANGLADESH	User Input
+Cargo	64,061.000 MT WHEAT IN BULK	User Input
+Partial Cargo (if any)	38,460.52 MT	User Input
+NOR Tendered	18-JAN-2026 18:25	User Input
+NOR Accepted	31-JAN-2026 22:50	User Input
+Laytime Commenced	20-JAN-2026 08:00	Auto-calc
+Discharge Commenced	23-JAN-2026 08:30	SOF Event
+Discharge Completed	01-MAR-2026 21:00	SOF Event
+SOF Event Log (Input Table)
+#	Date	Day	From	To	Hours	Factor	Counting Hours	Narration	Excluded?
+1	18-JAN	SUN	18:25	24:00	5.58	0	0.00	Awaiting inward clearance	Yes (NTC)
+2	19-JAN	MON	00:00	24:00	24.00	0	0.00	Awaiting documents	Yes (NTC)
+3	20-JAN	TUE	00:00	08:00	8.00	0	0.00	Awaiting NOR acceptance	Yes
+4	20-JAN	TUE	08:00	24:00	16.00	0.6	9.60	Laytime counting	No
+5	21-JAN	WED	00:00	24:00	24.00	0.6	14.40	Discharging preparation	No
+6	22-JAN	THU	00:00	10:00	10.00	0	0.00	Still awaiting documents	Yes
+7	22-JAN	THU	10:00	12:45	2.75	0	0.00	Inward formalities	Yes
+8	22-JAN	THU	12:45	17:00	4.25	0.6	2.55	Laytime counting	No
+9	22-JAN	THU	17:00	24:00	7.00	0	0.00	Pre-weekend holiday	Yes
+SOF Summary Statistics
+Metric	Value
+Total SOF Duration	42 days 2 hours 35 minutes
+Total Counting Hours	XXX.XX hours
+Total Non-Counting Hours	XXX.XX hours
+Number of Events	XX
+Number of Exclusions	XX
+Number of Suspensions	XX
+PART 3: LAYTIME CALCULATION SHEET (Template)
+Input Parameters
+Parameter	Value	Notes
+Total Cargo Quantity	64,061.000 MT	From Bill of Lading
+Partial Cargo Quantity	38,460.520 MT	For specific consignee
+Daily Discharge Rate	5,000 MT/Day	As per Charter Party
+Laytime Allowed (Partial)	7 days 16 hours 37 minutes	(38,460.52 ÷ 5,000) × 24 hrs
+Demurrage Rate	$20,000.00 per day	As per Charter Party
+Despatch Rate	$10,000.00 per day	As per Charter Party
+Week Start	Sunday 08:00	User configurable
+Week End	Friday 17:00	User configurable
+Holiday Exclusion	FHEX3 (Fri 17:00 to Sun 08:00)	User configurable
+Laytime Calculation Equations
+Equation 1: Laytime Allowed (Hours)
+text
+
+Laytime Allowed (hours) = (Partial Cargo Quantity ÷ Daily Discharge Rate) × 24
+
+Example:
+= (38,460.52 ÷ 5,000) × 24
+= 7.692104 × 24
+= 184.61 hours
+= 7 days 16 hours 37 minutes
+
+Equation 2: Total Laytime Used (Hours)
+text
+
+Laytime Used (hours) = Σ [ (End Time - Start Time) × Factor ] 
+                       for all events where Excluded = FALSE
+
+Example from your data:
+Event: 20-JAN 08:00 to 24:00 = 16 hours × 0.6 = 9.60 hours
+Event: 21-JAN 00:00 to 24:00 = 24 hours × 0.6 = 14.40 hours
+...
+Total Used = 494.35 hours (your calculation shows 37 days 2 hours 10 min = 890.17 hours?)
+
+Note: Your file shows discrepancy. Need to verify if used time includes all events or only partial cargo events.
+Equation 3: Demurrage Calculation
+text
+
+IF Laytime Used > Laytime Allowed THEN
+    Demurrage Days = (Laytime Used - Laytime Allowed) ÷ 24
+    Demurrage Amount = Demurrage Days × Daily Demurrage Rate
+ELSE
+    Despatch Days = (Laytime Allowed - Laytime Used) ÷ 24
+    Despatch Amount = Despatch Days × Daily Despatch Rate (usually 50% of demurrage)
+END IF
+
+Example from your Laytime PDF:
+Laytime Used = 37 days 2 hours 10 min = 890.17 hours
+Laytime Allowed = 12 days 19 hours 30 min = 307.50 hours
+Difference = 582.67 hours = 24.28 days
+Demurrage = 24.28 × $20,000 = $485,555.56
+
+Laytime Chronology Table
+Period	From	To	Duration	Factor	Counting Time	Excluded Reason
+Initial Waiting	18-JAN 18:25	20-JAN 08:00	37.58 hrs	0	0.00 hrs	NOR not accepted
+Counting Period 1	20-JAN 08:00	22-JAN 17:00	57.00 hrs	0.6	34.20 hrs	Working
+Weekend 1	22-JAN 17:00	25-JAN 08:00	63.00 hrs	0	0.00 hrs	FHEX exclusion
+Counting Period 2	25-JAN 08:00	29-JAN 17:00	105.00 hrs	0.6	63.00 hrs	Working
+Weekend 2	29-JAN 17:00	01-FEB 08:00	63.00 hrs	0	0.00 hrs	FHEX exclusion
+Shifting	31-JAN 18:00	31-JAN 22:50	4.83 hrs	0	0.00 hrs	Vessel operation
+Counting Period 3	01-FEB 08:25	05-FEB 17:00	104.58 hrs	0.6	62.75 hrs	Working
+Counting Period 4	05-FEB 17:00	01-MAR 21:00	Various	1.0	XXX hrs	On demurrage (full count)
+TOTAL					890.17 hrs	
+PART 4: EXCLUSION RULES & EQUATIONS
+Rule 1: Weekend Exclusion (FHEX - Friday 17:00 to Sunday 08:00)
+text
+
+IF (Day = Friday AND Time ≥ 17:00) OR
+   (Day = Saturday) OR
+   (Day = Sunday AND Time < 08:00) THEN
+    Factor = 0 (No time counts)
+END IF
+
+Rule 2: Holiday Exclusion
+text
+
+IF Date IN Holidays_Table THEN
+    Factor = 0 (No time counts)
+    // Some holidays also affect NOR acceptance
+END IF
+
+Rule 3: Pre/Post Holiday Exclusion
+text
+
+IF (Day before holiday AND Time ≥ 17:00) OR
+   (Day after holiday AND Time < 08:00) THEN
+    Factor = 0 (No time counts)
+END IF
+
+Rule 4: Vessel Operations (Shifting/Turning)
+text
+
+IF Narration CONTAINS ("shifting" OR "turning" OR "awaiting barge") THEN
+    Factor = 0 (Unless specifically negotiated)
+END IF
+
+Rule 5: Factor Application
+text
+
+Counting Hours = (End Time - Start Time) × Factor
+
+Where:
+Factor = 1.0 → Full time counts (on demurrage)
+Factor = 0.6 → Partial time counts (working but interrupted)
+Factor = 0.0 → No time counts (excluded period)
+
+PART 5: DEMURRAGE SUMMARY SHEET
+Final Calculation Summary
+Line	Item	Value
+1	Vessel Name	M.V. TOMAROS
+2	Voyage	RIO GRANDE → CHITTAGONG
+3	Consignee	NABIL AUTO FLOUR MILL
+4	Partial Cargo	38,460.520 MT
+5	Laytime Allowed (A)	7 days 16 hours 37 min (184.62 hrs)
+6	Laytime Used (B)	37 days 2 hours 10 min (890.17 hrs)
+7	Difference (B - A)	29 days 9 hours 33 min (705.55 hrs)
+8	Demurrage Rate	$20,000.00 per day
+9	Demurrage Amount	$588,166.67
+
+Note: Your PDF shows $485,555.56 because they used different allowed time (12 days 19 hrs). This suggests they calculated for entire cargo, not partial.
+Alternative Scenario (Despatch)
+Line	Item	Value
+1	Laytime Allowed (A)	7 days 16 hours 37 min
+2	Laytime Used (B)	5 days 0 hours 0 min
+3	Difference (A - B)	2 days 16 hours 37 min
+4	Despatch Rate (50% of demurrage)	$10,000.00 per day
+5	Despatch Amount	$26,902.78 (Refund to Charterer)
+PART 6: HOLIDAY CRUD OPERATIONS
+Holiday Entry Form Fields
+Field	Type	Example
+Holiday Name	Text	National Election Day
+Date	Date	11-FEB-2026
+Full Day Exclusion	Boolean	Yes (24 hours)
+Pre-Holiday Exclusion (17:00 onward)	Boolean	Yes
+Post-Holiday Exclusion (until 08:00)	Boolean	Yes
+Affects NOR Acceptance	Boolean	Yes/No
+Holiday Impact Equations
+text
+
+For each holiday date:
+
+    IF Full_Day_Exclusion = TRUE THEN
+        Exclude entire 24 hours
+    
+    IF Pre_Holiday_Exclusion = TRUE THEN
+        Exclude from 17:00 on previous day
+    
+    IF Post_Holiday_Exclusion = TRUE THEN
+        Exclude until 08:00 on following day
+
+PART 7: SAMPLE DATA FLOW (Based on Your Files)
+Step 1: User Inputs Voyage Data
+text
+
+NOR Tendered: 18-JAN-2026 18:25
+Total Cargo: 64,061 MT
+Partial Cargo (Nabil): 38,460.52 MT
+Discharge Rate: 5,000 MT/day
+Demurrage Rate: $20,000/day
+Week Start: Sunday 08:00
+Week End: Friday 17:00
+
+Step 2: System Calculates Allowed Time
+text
+
+Allowed Hours = (38,460.52 ÷ 5,000) × 24 = 184.62 hours = 7 days 16 hrs 37 min
+
+Step 3: User Adds SOF Events (from your SOF pages 2-9)
+text
+
+Event 1: 20-JAN 08:00 to 22-JAN 17:00, Factor 0.6 → Counting 34.20 hrs
+Event 2: 25-JAN 08:00 to 29-JAN 17:00, Factor 0.6 → Counting 63.00 hrs
+Event 3: 01-FEB 08:25 to 05-FEB 17:00, Factor 0.6 → Counting 62.75 hrs
+Event 4: 05-FEB 17:00 onward, Factor 1.0 (on demurrage) → Counting 730.22 hrs
+
+Step 4: System Outputs Result
+text
+
+Total Used = 890.17 hours
+Allowed = 184.62 hours
+Demurrage Hours = 705.55 hours
+Demurrage Days = 29.40 days
+Demurrage Amount = $588,000
+
+PART 8: RECOMMENDED IMPLEMENTATION APPROACH
+Phase 1: Spreadsheet-Based MVP (1-2 days)
+
+    Build SOF sheet with event logging
+
+    Create Laytime calculation sheet with formulas
+
+    Add holiday lookup table
+
+Phase 2: Automated Tool (1 week)
+
+    Use Google Sheets + Apps Script
+
+    Build custom function: =CALCULATE_LAYTIME(event_range, parameters)
+
+    Add UI for holiday management
+
+Phase 3: Web Application (2-3 weeks)
+
+    Retool or Budibase for frontend
+
+    PostgreSQL for data storage
+
+    API for laytime calculation
+
+KEY EQUATIONS SUMMARY CARD
+text
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    LAYTIME CALCULATIONS                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  LAYTIME ALLOWED (hours) = (PARTIAL_MT ÷ RATE_MT_PER_DAY) × 24  │
+│                                                                  │
+│  LAYTIME USED (hours) = Σ [ (END - START) × FACTOR ]            │
+│                        where EXCLUDED = FALSE                    │
+│                                                                  │
+│  EXCLUDED = WEEKEND_RULE OR HOLIDAY_RULE OR NTC_EVENT           │
+│                                                                  │
+│  IF USED > ALLOWED:                                             │
+│      DEMURRAGE = (USED - ALLOWED) ÷ 24 × DEM_RATE               │
+│  ELSE:                                                          │
+│      DESPATCH = (ALLOWED - USED) ÷ 24 × DESPATCH_RATE           │
+│                                                                  │
+│  FACTOR RULES:                                                  │
+│      Factor 1.0 = Full counting (on demurrage)                  │
+│      Factor 0.6 = Partial counting (working interruptions)      │
+│      Factor 0.0 = No counting (exclusions)                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+
+COMPLETE EXECUTION PLAN FOR LAYTIME & DEMURRAGE CALCULATOR SYSTEM
+EXECUTIVE SUMMARY
+
+Build a web-based application that allows users to:
+
+    Create voyages with cargo and rate parameters
+
+    Add SOF events with start/end times and factors
+
+    Configure holidays and weekend rules
+
+    Automatically calculate laytime used vs allowed
+
+    Generate demurrage/despatch invoices
+
+Tech Stack Recommended: Python + Streamlit (easiest for single developer) or React + Node.js (for production)
+PHASE 1: DATABASE DESIGN (Week 1)
+Table 1: voyages
+text
+
+Column Name          Type            Description
+------------------- --------------- ---------------------------------
+id                   INTEGER         Primary key
+vessel_name          TEXT            M.V. TOMAROS
+imo                  TEXT            9867059
+port_name            TEXT            CHITTAGONG, BANGLADESH
+cargo_description    TEXT            WHEAT IN BULK
+total_cargo_mt       REAL            64061.000
+partial_cargo_mt     REAL            38460.520
+discharge_rate_mt    REAL            5000.00
+demurrage_rate       REAL            20000.00
+despatch_rate        REAL            10000.00
+nor_tendered         DATETIME        2026-01-18 18:25:00
+nor_accepted         DATETIME        2026-01-31 22:50:00
+week_start_day       TEXT            Sunday
+week_start_time      TEXT            08:00
+week_end_day         TEXT            Friday
+week_end_time        TEXT            17:00
+created_at           DATETIME        CURRENT_TIMESTAMP
+
+Table 2: sof_events
+text
+
+Column Name          Type            Description
+------------------- --------------- ---------------------------------
+id                   INTEGER         Primary key
+voyage_id            INTEGER         Foreign key to voyages
+event_date           DATE            2026-01-20
+start_time           TIME            08:00:00
+end_time             TIME            24:00:00
+factor               REAL            0.6
+narration            TEXT            Discharging operation continued
+is_excluded          BOOLEAN         FALSE
+exclusion_reason     TEXT            NULL
+created_at           DATETIME        CURRENT_TIMESTAMP
+
+Table 3: holidays
+text
+
+Column Name          Type            Description
+------------------- --------------- ---------------------------------
+id                   INTEGER         Primary key
+holiday_name         TEXT            National Election Day
+holiday_date         DATE            2026-02-11
+full_day_exclusion   BOOLEAN         TRUE
+pre_holiday_exclude  BOOLEAN         TRUE
+post_holiday_exclude BOOLEAN         TRUE
+affects_nor          BOOLEAN         FALSE
+year                INTEGER         2026
+created_at           DATETIME        CURRENT_TIMESTAMP
+
+Table 4: calculation_results
+text
+
+Column Name          Type            Description
+------------------- --------------- ---------------------------------
+id                   INTEGER         Primary key
+voyage_id            INTEGER         Foreign key to voyages
+allowed_hours        REAL            184.62
+used_hours           REAL            890.17
+demurrage_hours      REAL            705.55
+demurrage_days       REAL            29.40
+demurrage_amount     REAL            588000.00
+calculation_date     DATETIME        CURRENT_TIMESTAMP
+
+PHASE 2: EQUATIONS & ALGORITHMS (Week 2)
+EQUATION 1: Calculate Laytime Allowed
+text
+
+INPUTS:
+    partial_cargo_mt = 38460.52
+    discharge_rate_mt = 5000
+
+FORMULA:
+    allowed_hours = (partial_cargo_mt / discharge_rate_mt) * 24
+    
+EXAMPLE:
+    allowed_hours = (38460.52 / 5000) * 24
+    allowed_hours = 7.692104 * 24
+    allowed_hours = 184.6105
+    
+OUTPUT:
+    allowed_days = 7
+    allowed_hours_remainder = 16
+    allowed_minutes = 37
+
+EQUATION 2: Check If Time Should Count
+text
+
+FUNCTION is_time_counting(datetime, voyage, holidays):
+    
+    # Rule 1: Weekend check (FHEX - Fri 17:00 to Sun 08:00)
+    weekday = datetime.weekday()  # Monday=0, Sunday=6
+    hour = datetime.hour
+    minute = datetime.minute
+    
+    IF voyage.week_end_day == "Friday" AND voyage.week_end_time == "17:00":
+        IF weekday == 4 AND (hour >= 17 OR (hour == 17 AND minute >= 0)):
+            RETURN FALSE  # Friday after 17:00
+    
+    IF voyage.week_start_day == "Sunday" AND voyage.week_start_time == "08:00":
+        IF weekday == 5:  # Saturday
+            RETURN FALSE
+        IF weekday == 6 AND hour < 8:  # Sunday before 08:00
+            RETURN FALSE
+    
+    # Rule 2: Holiday check
+    FOR each holiday IN holidays:
+        IF datetime.date() == holiday.holiday_date:
+            IF holiday.full_day_exclusion:
+                RETURN FALSE
+        IF holiday.pre_holiday_exclude:
+            previous_day = datetime.date() - timedelta(days=1)
+            IF previous_day == holiday.holiday_date:
+                IF hour >= 17:
+                    RETURN FALSE
+        IF holiday.post_holiday_exclude:
+            next_day = datetime.date() + timedelta(days=1)
+            IF next_day == holiday.holiday_date:
+                IF hour < 8:
+                    RETURN FALSE
+    
+    RETURN TRUE
+
+EQUATION 3: Calculate Used Laytime
+text
+
+FUNCTION calculate_used_hours(voyage_id, voyage, events, holidays):
+    total_used_hours = 0
+    current_time = voyage.nor_accepted
+    
+    FOR each event IN events (sorted by event_date, start_time):
+        event_start = datetime.combine(event.event_date, event.start_time)
+        event_end = datetime.combine(event.event_date, event.end_time)
+        
+        # Only count from NOR acceptance onward
+        IF event_start < voyage.nor_accepted:
+            event_start = voyage.nor_accepted
+        
+        # Calculate duration in hours
+        duration_hours = (event_end - event_start).total_seconds() / 3600
+        
+        # Count only counting portions
+        counting_hours = 0
+        time_step = timedelta(minutes=15)  # Check every 15 minutes
+        
+        current = event_start
+        WHILE current < event_end:
+            IF is_time_counting(current, voyage, holidays):
+                IF event.factor > 0:
+                    counting_hours += (time_step.total_seconds() / 3600) * event.factor
+            current += time_step
+        
+        total_used_hours += counting_hours
+    
+    RETURN total_used_hours
+
+EQUATION 4: Calculate Demurrage/Despatch
+text
+
+FUNCTION calculate_demurrage(allowed_hours, used_hours, demurrage_rate, despatch_rate):
+    difference_hours = used_hours - allowed_hours
+    
+    IF difference_hours > 0:
+        # Demurrage scenario
+        demurrage_days = difference_hours / 24
+        amount = demurrage_days * demurrage_rate
+        return {
+            "status": "DEMURRAGE",
+            "difference_hours": difference_hours,
+            "days": demurrage_days,
+            "amount": amount,
+            "rate_used": demurrage_rate
+        }
+    ELSE:
+        # Despatch scenario (early completion)
+        despatch_days = abs(difference_hours) / 24
+        amount = despatch_days * despatch_rate
+        return {
+            "status": "DESPATCH",
+            "difference_hours": difference_hours,
+            "days": despatch_days,
+            "amount": amount,
+            "rate_used": despatch_rate
+        }
+
+EQUATION 5: Factor Application Logic
+text
+
+FUNCTION apply_factor(event_narration, default_factor):
+    narration_lower = event_narration.lower()
+    
+    # Full counting scenarios (Factor = 1.0)
+    IF "on demurrage" IN narration_lower:
+        RETURN 1.0
+    IF "discharging completed" IN narration_lower:
+        RETURN 1.0
+    
+    # Partial counting scenarios (Factor = 0.6)
+    IF "discharging operation continued" IN narration_lower:
+        RETURN 0.6
+    IF "discharging operation resumed" IN narration_lower:
+        RETURN 0.6
+    
+    # Zero counting scenarios (Factor = 0)
+    IF "awaiting for lighter vessel" IN narration_lower:
+        RETURN 0
+    IF "vessel turning" IN narration_lower:
+        RETURN 0
+    IF "vessel shifting" IN narration_lower:
+        RETURN 0
+    IF "suspended due to" IN narration_lower:
+        RETURN 0
+    IF "weekly holiday" IN narration_lower:
+        RETURN 0
+    IF "ramadan sehri break" IN narration_lower:
+        RETURN 0
+    IF "ramadan iftar break" IN narration_lower:
+        RETURN 0
+    IF "waiting for barge" IN narration_lower:
+        RETURN 0
+    IF "crane under maintenance" IN narration_lower:
+        RETURN 0
+    
+    RETURN default_factor
+
+PHASE 3: SCREEN FLOW & USER JOURNEY (Week 3)
+SCREEN 1: Dashboard
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  LAYTIME CALCULATOR DASHBOARD                    [New Voyage] │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  Recent Voyages:                                           │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ M.V. TOMAROS - CHITTAGONG           Status: Active   │ │
+│  │ Demurrage: $588,000                  [View] [Edit]    │ │
+│  ├──────────────────────────────────────────────────────┤ │
+│  │ M.V. SEA STAR - MONGLA               Status: Complete │ │
+│  │ Despatch: $12,500                    [View] [Edit]    │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  Quick Stats:                                              │
+│  Total Active Voyages: 3                                   │
+│  Total Demurrage Due: $588,000                             │
+│  Total Despatch Due: $12,500                               │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 2: New Voyage Form
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  CREATE NEW VOYAGE                                 [Cancel] │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  VESSEL INFORMATION:                                       │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Vessel Name: [M.V. TOMAROS_________________]         │ │
+│  │ IMO Number:  [9867059____________________]           │ │
+│  │ Port Name:   [CHITTAGONG, BANGLADESH______]          │ │
+│  │ Cargo:       [WHEAT IN BULK________________]         │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  CARGO & RATES:                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Total Cargo (MT):     [64061.00_______________]      │ │
+│  │ Partial Cargo (MT):   [38460.52_______________]      │ │
+│  │ Discharge Rate (MT/Day): [5000.00_____________]      │ │
+│  │ Demurrage Rate ($/Day):  [20000.00_____________]     │ │
+│  │ Despatch Rate ($/Day):   [10000.00_____________]     │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  TIMELINE:                                                 │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ NOR Tendered: [18-JAN-2026 18:25] [📅]               │ │
+│  │ NOR Accepted: [31-JAN-2026 22:50] [📅]               │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  WEEKEND RULES:                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Week Starts: [Sunday ▼] at [08:00 ▼]                 │ │
+│  │ Week Ends:   [Friday ▼] at [17:00 ▼]                 │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│                                    [SAVE VOYAGE] [CANCEL] │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 3: SOF Event Manager
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  SOF EVENTS - M.V. TOMAROS                        [+ Add Event] │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ FILTERS: [All Events] [Counting Only] [Excluded Only]  │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                            │
+│  Event List:                                               │
+│  ┌────┬──────┬────────┬──────┬──────┬──────┬────────────┐ │
+│  │ #  │ Date │ From   │ To   │ Hrs  │ Factor│ Narration │ │
+│  ├────┼──────┼────────┼──────┼──────┼──────┼────────────┤ │
+│  │ 1  │20-JAN│ 08:00  │24:00 │16.00 │ 0.6  │Discharging│ │
+│  │ 2  │21-JAN│ 00:00  │24:00 │24.00 │ 0.6  │Discharging│ │
+│  │ 3  │22-JAN│ 12:45  │17:00 │ 4.25 │ 0.6  │Laytime cnt│ │
+│  │ 4  │22-JAN│ 17:00  │24:00 │ 7.00 │ 0.0  │Pre-weekend│ │
+│  │ 5  │25-JAN│ 08:00  │24:00 │16.00 │ 0.6  │Resumed    │ │
+│  └────┴──────┴────────┴──────┴──────┴──────┴────────────┘ │
+│                                                            │
+│  [Edit] [Delete] [Duplicate] [Export CSV]                 │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 4: Add/Edit Event Form
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  ADD SOF EVENT - M.V. TOMAROS                    [Cancel]  │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  EVENT DETAILS:                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Date:         [23-JAN-2026] [📅]                     │ │
+│  │ Start Time:   [08:30] [⏰]                           │ │
+│  │ End Time:     [13:00] [⏰]                           │ │
+│  │ Factor:       [0.6] [Help: 0=excluded, 1=full count]│ │
+│  │                                                      │ │
+│  │ Narration:                                           │ │
+│  │ [Discharging operation commenced and continued_____]│ │
+│  │ [__________________________________________________]│ │
+│  │                                                      │ │
+│  │ ☑ Auto-calculate factor from narration              │ │
+│  │ ☐ Mark as excluded period                           │ │
+│  │    Exclusion reason: [_____________________]        │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│                              [SAVE EVENT] [SAVE & ADD NEW] │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 5: Holiday Manager (CRUD)
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  HOLIDAY MANAGER                                  [+ Add Holiday] │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Year: [2026 ▼]                        [Apply Filter]  │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                            │
+│  Holiday List:                                             │
+│  ┌────┬────────────┬────────────┬──────┬──────┬─────────┐ │
+│  │ #  │ Name       │ Date       │ Full │ Pre  │ Post    │ │
+│  ├────┼────────────┼────────────┼──────┼──────┼─────────┤ │
+│  │ 1  │National    │11-FEB-2026 │ ✓    │ ✓    │ ✓       │ │
+│  │    │Election    │            │      │      │         │ │
+│  │ 2  │Shab-e-Barat│04-FEB-2026 │ ✓    │ ✓    │ ✓       │ │
+│  │ 3  │Intl Mother │21-FEB-2026 │ ✓    │ ✓    │ ✓       │ │
+│  │    │Language Day│            │      │      │         │ │
+│  └────┴────────────┴────────────┴──────┴──────┴─────────┘ │
+│                                                            │
+│  [Edit] [Delete] [Apply to Voyage]                         │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 6: Add Holiday Form
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  ADD HOLIDAY                                      [Cancel] │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Holiday Name: [National Election Day_____________]   │ │
+│  │ Date:         [11-FEB-2026] [📅]                     │ │
+│  │ Year:         2026 (auto)                            │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  EXCLUSION RULES:                                          │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ ☑ Full day exclusion (00:00 to 24:00)               │ │
+│  │ ☑ Pre-holiday exclusion (17:00 onwards previous day)│ │
+│  │ ☑ Post-holiday exclusion (until 08:00 next day)     │ │
+│  │ ☐ Affects NOR acceptance                            │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  NOTES:                                                    │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ [Government declared holiday for national election__]│ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│                                    [SAVE HOLIDAY] [CANCEL] │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 7: Laytime Calculation Results
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  LAYTIME CALCULATION - M.V. TOMAROS              [Recalculate] │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  SUMMARY CARD:                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │                                                      │ │
+│  │  ALLOWED: 7d 16h 37m    USED: 37d 2h 10m            │ │
+│  │                                                      │ │
+│  │  DIFFERENCE: 29d 9h 33m EXCESS                       │ │
+│  │                                                      │ │
+│  │  STATUS: DEMURRAGE                                    │ │
+│  │  AMOUNT: $588,166.67                                  │ │
+│  │                                                      │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  DETAILED BREAKDOWN:                                       │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Laytime Allowed Calculation:                         │ │
+│  │   38460.52 MT ÷ 5000 MT/day = 7.6921 days           │ │
+│  │   7.6921 days × 24 = 184.61 hours                   │ │
+│  │   184.61 hours = 7 days 16 hours 37 minutes         │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Laytime Used Calculation:                            │ │
+│  │                                                      │ │
+│  │ Period 1: 20-JAN 08:00 to 22-JAN 17:00              │ │
+│  │   Duration: 57.00 hours × 0.6 = 34.20 hours         │ │
+│  │                                                      │ │
+│  │ Period 2: 25-JAN 08:00 to 29-JAN 17:00              │ │
+│  │   Duration: 105.00 hours × 0.6 = 63.00 hours        │ │
+│  │                                                      │ │
+│  │ Period 3: 01-FEB 08:25 to 05-FEB 17:00              │ │
+│  │   Duration: 104.58 hours × 0.6 = 62.75 hours        │ │
+│  │                                                      │ │
+│  │ Period 4: 05-FEB 17:00 to 01-MAR 21:00              │ │
+│  │   Duration: 730.22 hours × 1.0 = 730.22 hours       │ │
+│  │                                                      │ │
+│  │ TOTAL USED: 34.20 + 63.00 + 62.75 + 730.22          │ │
+│  │           = 890.17 hours = 37 days 2 hours 10 min   │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  EXCLUSIONS APPLIED:                                       │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ • Weekends (FHEX): 13 days excluded                 │ │
+│  │ • Holidays: 3 days excluded                         │ │
+│  │ • Vessel turning/shifting: 8 events excluded        │ │
+│  │ • Waiting for barge: 15 events excluded             │ │
+│  │ • Ramadan breaks: 10 events excluded                │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  [EXPORT PDF] [EXPORT EXCEL] [PRINT] [SHARE]              │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+SCREEN 8: Demurrage Invoice
+text
+
+┌────────────────────────────────────────────────────────────┐
+│  DEMURRAGE INVOICE                               [Print]   │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  INVOICE #: INV-2026-001                                   │
+│  DATE: 02-MAR-2026                                         │
+│                                                            │
+│  TO:                                                       │
+│  NABIL AUTO FLOUR MILL                                     │
+│  Chittagong, Bangladesh                                    │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ VESSEL:        M.V. TOMAROS                          │ │
+│  │ VOYAGE:        Rio Grande to Chittagong              │ │
+│  │ CARGO:         38,460.520 MT Wheat in Bulk           │ │
+│  │ B/L NOS:       9, 10, 11, 12, 13                     │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  LAYTIME CALCULATION:                                      │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Laytime Allowed:      7 days 16 hours 37 minutes     │ │
+│  │ Laytime Used:        37 days 02 hours 10 minutes     │ │
+│  │ Excess Laytime:      29 days 09 hours 33 minutes     │ │
+│  │                                                      │ │
+│  │ Demurrage Rate:      $20,000.00 per day              │ │
+│  │ Demurrage Days:      29.3986 days                    │ │
+│  │                                                      │ │
+│  │ DEMURRAGE DUE:       $587,972.22                     │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  PAYMENT TERMS:                                            │
+│  Due within 15 days of invoice date                        │
+│                                                            │
+│  BANK DETAILS:                                             │
+│  Account Name: [Shipping Company Name]                     │
+│  Bank: [Bank Name]                                         │
+│  Account: [Account Number]                                 │
+│  SWIFT: [SWIFT Code]                                       │
+│                                                            │
+│  Authorized Signature: ___________________                 │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+
+PHASE 4: API ENDPOINTS (Week 4)
+Endpoint 1: Create Voyage
+text
+
+POST /api/voyages
+Request Body:
+{
+    "vessel_name": "M.V. TOMAROS",
+    "imo": "9867059",
+    "port_name": "CHITTAGONG",
+    "total_cargo_mt": 64061.00,
+    "partial_cargo_mt": 38460.52,
+    "discharge_rate_mt": 5000.00,
+    "demurrage_rate": 20000.00,
+    "despatch_rate": 10000.00,
+    "nor_tendered": "2026-01-18 18:25:00",
+    "nor_accepted": "2026-01-31 22:50:00",
+    "week_start_day": "Sunday",
+    "week_start_time": "08:00",
+    "week_end_day": "Friday",
+    "week_end_time": "17:00"
+}
+
+Response:
+{
+    "id": 1,
+    "message": "Voyage created successfully",
+    "allowed_laytime_hours": 184.61,
+    "allowed_laytime_display": "7 days 16 hours 37 minutes"
+}
+
+Endpoint 2: Add SOF Event
+text
+
+POST /api/voyages/{voyage_id}/events
+Request Body:
+{
+    "event_date": "2026-01-20",
+    "start_time": "08:00:00",
+    "end_time": "24:00:00",
+    "factor": 0.6,
+    "narration": "Discharging operation commenced and continued"
+}
+
+Response:
+{
+    "id": 45,
+    "message": "Event added successfully",
+    "counting_hours": 9.60,
+    "is_excluded": false
+}
+
+Endpoint 3: Get Calculation
+text
+
+GET /api/voyages/{voyage_id}/calculation
+
+Response:
+{
+    "voyage_id": 1,
+    "vessel_name": "M.V. TOMAROS",
+    "allowed": {
+        "hours": 184.61,
+        "days": 7,
+        "hours_remainder": 16,
+        "minutes": 37,
+        "display": "7 days 16 hours 37 minutes"
+    },
+    "used": {
+        "hours": 890.17,
+        "days": 37,
+        "hours_remainder": 2,
+        "minutes": 10,
+        "display": "37 days 2 hours 10 minutes"
+    },
+    "difference": {
+        "hours": 705.56,
+        "days": 29,
+        "hours_remainder": 9,
+        "minutes": 33,
+        "display": "29 days 9 hours 33 minutes",
+        "type": "EXCESS"
+    },
+    "demurrage": {
+        "status": "DEMURRAGE",
+        "days": 29.3983,
+        "rate": 20000.00,
+        "amount": 587966.67,
+        "display": "$587,966.67"
+    }
+}
+
+Endpoint 4: Holiday CRUD
+text
+
+GET    /api/holidays?year=2026
+POST   /api/holidays
+PUT    /api/holidays/{id}
+DELETE /api/holidays/{id}
+
+POST /api/holidays Request Body:
+{
+    "holiday_name": "National Election Day",
+    "holiday_date": "2026-02-11",
+    "full_day_exclusion": true,
+    "pre_holiday_exclude": true,
+    "post_holiday_exclude": true,
+    "affects_nor": false
+}
+
+PHASE 5: IMPLEMENTATION ROADMAP
+Week 1: Database Setup
+
+    Install PostgreSQL or SQLite
+
+    Create database schema (4 tables)
+
+    Set up migration system
+
+    Write seed data for holidays
+
+Week 2: Backend Development
+
+    Set up Python Flask/FastAPI or Node.js/Express
+
+    Implement laytime calculation engine
+
+    Create API endpoints
+
+    Write unit tests for equations
+
+    Test with your TOMAROS data
+
+Week 3: Frontend Development
+
+    Set up React or Vue.js project
+
+    Build Dashboard screen
+
+    Build Voyage form
+
+    Build SOF Event Manager
+
+    Build Holiday Manager
+
+Week 4: Integration & Testing
+
+    Connect frontend to backend APIs
+
+    Implement calculation display screen
+
+    Add PDF export functionality
+
+    Test with all your PDF scenarios
+
+    Deploy to cloud (Heroku/AWS/Vercel)
+
+PHASE 6: QUICK START CODE STRUCTURE
+Project Folder Structure
+text
+
+laytime-calculator/
+├── backend/
+│   ├── app.py              # Main application
+│   ├── models.py           # Database models
+│   ├── calculations.py     # Laytime equations
+│   ├── routes/
+│   │   ├── voyages.py
+│   │   ├── events.py
+│   │   ├── holidays.py
+│   │   └── calculations.py
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── VoyageForm.jsx
+│   │   │   ├── EventManager.jsx
+│   │   │   ├── HolidayManager.jsx
+│   │   │   └── CalculationResults.jsx
+│   │   ├── services/
+│   │   │   └── api.js
+│   │   └── App.jsx
+│   └── package.json
+├── database/
+│   └── schema.sql
+└── README.md
+
+Minimal Viable Product (MVP) Files
+
+File 1: backend/models.py
+python
+
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Date, Time
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
+
+class Voyage(Base):
+    __tablename__ = 'voyages'
+    id = Column(Integer, primary_key=True)
+    vessel_name = Column(String)
+    total_cargo_mt = Column(Float)
+    partial_cargo_mt = Column(Float)
+    discharge_rate_mt = Column(Float)
+    demurrage_rate = Column(Float)
+    nor_tendered = Column(DateTime)
+    nor_accepted = Column(DateTime)
+    week_start_day = Column(String)
+    week_start_time = Column(String)
+    week_end_day = Column(String)
+    week_end_time = Column(String)
+
+class SOFEvent(Base):
+    __tablename__ = 'sof_events'
+    id = Column(Integer, primary_key=True)
+    voyage_id = Column(Integer)
+    event_date = Column(Date)
+    start_time = Column(Time)
+    end_time = Column(Time)
+    factor = Column(Float)
+    narration = Column(String)
+
+class Holiday(Base):
+    __tablename__ = 'holidays'
+    id = Column(Integer, primary_key=True)
+    holiday_name = Column(String)
+    holiday_date = Column(Date)
+    full_day_exclusion = Column(Boolean)
+    pre_holiday_exclude = Column(Boolean)
+    post_holiday_exclude = Column(Boolean)
+
+File 2: backend/calculations.py
+python
+
+from datetime import datetime, timedelta
+
+def calculate_allowed_laytime(partial_cargo_mt, discharge_rate_mt):
+    """Equation 1: Calculate allowed laytime in hours"""
+    allowed_hours = (partial_cargo_mt / discharge_rate_mt) * 24
+    return allowed_hours
+
+def is_excluded_period(dt, voyage, holidays):
+    """Equation 2: Check if time period should count"""
+    # Weekend check
+    weekday = dt.weekday()
+    hour = dt.hour
+    
+    # Friday after 17:00 (weekend starts)
+    if voyage.week_end_day == "Friday":
+        if weekday == 4 and hour >= 17:
+            return True
+    
+    # Saturday all day
+    if weekday == 5:
+        return True
+    
+    # Sunday before 08:00
+    if voyage.week_start_day == "Sunday":
+        if weekday == 6 and hour < 8:
+            return True
+    
+    # Holiday check
+    for holiday in holidays:
+        if dt.date() == holiday.holiday_date:
+            if holiday.full_day_exclusion:
+                return True
+        if holiday.pre_holiday_exclude:
+            if dt.date() == holiday.holiday_date - timedelta(days=1):
+                if hour >= 17:
+                    return True
+        if holiday.post_holiday_exclude:
+            if dt.date() == holiday.holiday_date + timedelta(days=1):
+                if hour < 8:
+                    return True
+    
+    return False
+
+def calculate_used_laytime(voyage, events, holidays):
+    """Equation 3: Calculate total used laytime"""
+    total_hours = 0.0
+    
+    for event in events:
+        start = datetime.combine(event.event_date, event.start_time)
+        end = datetime.combine(event.event_date, event.end_time)
+        
+        # Start counting from NOR acceptance
+        if start < voyage.nor_accepted:
+            start = voyage.nor_accepted
+        
+        # Calculate in 15-minute increments
+        current = start
+        while current < end:
+            if not is_excluded_period(current, voyage, holidays):
+                # Count 15 minutes with factor
+                total_hours += (0.25 * event.factor)
+            current += timedelta(minutes=15)
+    
+    return total_hours
+
+def calculate_demurrage(allowed_hours, used_hours, demurrage_rate, despatch_rate):
+    """Equation 4: Calculate demurrage or despatch"""
+    diff_hours = used_hours - allowed_hours
+    
+    if diff_hours > 0:
+        days = diff_hours / 24
+        amount = days * demurrage_rate
+        return {"type": "DEMURRAGE", "days": days, "amount": amount}
+    else:
+        days = abs(diff_hours) / 24
+        amount = days * despatch_rate
+        return {"type": "DESPATCH", "days": days, "amount": amount}
+
+File 3: frontend/App.jsx (React Example)
+jsx
+
+import React, { useState } from 'react';
+import Dashboard from './components/Dashboard';
+import VoyageForm from './components/VoyageForm';
+import EventManager from './components/EventManager';
+import HolidayManager from './components/HolidayManager';
+import CalculationResults from './components/CalculationResults';
+
+function App() {
+    const [currentView, setCurrentView] = useState('dashboard');
+    const [selectedVoyageId, setSelectedVoyageId] = useState(null);
+    
+    return (
+        <div className="app">
+            <nav>
+                <button onClick={() => setCurrentView('dashboard')}>Dashboard</button>
+                <button onClick={() => setCurrentView('new-voyage')}>New Voyage</button>
+                <button onClick={() => setCurrentView('holidays')}>Holidays</button>
+            </nav>
+            
+            <main>
+                {currentView === 'dashboard' && 
+                    <Dashboard onSelectVoyage={(id) => {
+                        setSelectedVoyageId(id);
+                        setCurrentView('voyage-detail');
+                    }} />
+                }
+                
+                {currentView === 'new-voyage' && 
+                    <VoyageForm onSave={() => setCurrentView('dashboard')} />
+                }
+                
+                {currentView === 'voyage-detail' && selectedVoyageId && 
+                    <>
+                        <EventManager voyageId={selectedVoyageId} />
+                        <CalculationResults voyageId={selectedVoyageId} />
+                    </>
+                }
+                
+                {currentView === 'holidays' && 
+                    <HolidayManager />
+                }
+            </main>
+        </div>
+    );
+}
+
+export default App;
+
+DELIVERABLES CHECKLIST
+
+By following this plan, you will have:
+
+    Complete database schema
+
+    All equations documented
+
+    Screen designs for all 8 screens
+
+    API endpoints specification
+
+    Code structure and examples
+
+    4-week implementation roadmap
+
+    Test data from your TOMAROS files
+
+NEXT ACTIONS FOR YOU
+
+    Copy this plan to your project documentation
+
+    Choose your tech stack (I recommend Python + Streamlit for fastest results)
+
+    Start with Phase 1: Create database schema
+
+    Test equations using your TOMAROS data as validation
+
+    Build screen by screen following the designs above
+
+Would you like me to provide the complete working code for any specific screen or the entire application in your chosen technology?
+GIVE ME ALGORITHM AND FLOW CHART OF THE PROJECT AND CALCULATION AND EQUATION
+COMPLETE ALGORITHM & FLOWCHART FOR LAYTIME CALCULATOR SYSTEM
+PART 1: MASTER FLOWCHART - OVERALL SYSTEM
+text
+
+                                    ┌─────────────────────────────────┐
+                                    │           START                   │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │    USER LOGIN / DASHBOARD        │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                          ┌───────────────────────────┼───────────────────────────┐
+                          │                           │                           │
+                          ▼                           ▼                           ▼
+            ┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+            │  CREATE NEW VOYAGE  │     │  MANAGE HOLIDAYS    │     │  VIEW EXISTING      │
+            │                     │     │                     │     │  VOYAGES            │
+            └─────────┬───────────┘     └─────────┬───────────┘     └─────────┬───────────┘
+                      │                           │                           │
+                      ▼                           ▼                           ▼
+            ┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+            │  Input Voyage Data: │     │  CRUD Operations:   │     │  Select Voyage      │
+            │  - Vessel details   │     │  - Add Holiday      │     │                     │
+            │  - Cargo quantity   │     │  - Edit Holiday     │     └─────────┬───────────┘
+            │  - Discharge rate   │     │  - Delete Holiday   │               │
+            │  - NOR dates        │     │  - Apply to year    │               │
+            │  - Weekend rules    │     └─────────────────────┘               │
+            └─────────┬───────────┘                                           │
+                      │                                                       │
+                      ▼                                                       ▼
+            ┌─────────────────────────────────────────────────────────────────┐
+            │                      VOYAGE DASHBOARD                           │
+            │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+            │  │ Add SOF Events  │  │ Run Calculation │  │ View Results    │ │
+            │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
+            └───────────┼────────────────────┼────────────────────┼───────────┘
+                        │                    │                    │
+                        ▼                    ▼                    ▼
+            ┌─────────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+            │  SOF EVENT INPUT    │  │  LAYTIME        │  │  DISPLAY        │
+            │  - Date/Time        │  │  CALCULATION    │  │  RESULTS        │
+            │  - Factor           │  │  ENGINE         │  │  - Summary      │
+            │  - Narration        │  │                 │  │  - Breakdown    │
+            │  - Auto-factor      │  └────────┬────────┘  │  - Invoice      │
+            └─────────┬───────────┘           │           └─────────────────┘
+                      │                       │
+                      ▼                       ▼
+            ┌─────────────────────────────────────────────────┐
+            │              SAVE TO DATABASE                    │
+            └─────────────────────────────────────────────────┘
+
+PART 2: LAYTIME CALCULATION ALGORITHM - DETAILED FLOWCHART
+text
+
+                                    ┌─────────────────────────────────┐
+                                    │   START CALCULATION              │
+                                    │   Input: Voyage ID               │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 1: Load Voyage Data       │
+                                    │  - partial_cargo_mt             │
+                                    │  - discharge_rate_mt            │
+                                    │  - nor_accepted datetime        │
+                                    │  - demurrage_rate               │
+                                    │  - weekend rules                │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 2: Calculate Allowed      │
+                                    │  Laytime (Equation 1)           │
+                                    │                                 │
+                                    │  allowed_hours =                │
+                                    │    (partial_cargo / rate) * 24  │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 3: Load All SOF Events    │
+                                    │  for this Voyage                │
+                                    │  Sort by date & time            │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 4: Load Holidays for      │
+                                    │  Voyage Date Range              │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 5: Initialize Variables   │
+                                    │  total_used_hours = 0           │
+                                    │  current_time = nor_accepted    │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 6: Process Each Event     │
+                                    │  For event in events:           │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  ┌─────────────────────────────┐│
+                                    │  │ For each 15-min interval    ││
+                                    │  │ in event:                   ││
+                                    │  └─────────────┬───────────────┘│
+                                    │                │               │
+                                    │                ▼               │
+                                    │  ┌─────────────────────────────┐│
+                                    │  │ Is time excluded?           ││
+                                    │  │ Call is_excluded() function ││
+                                    │  └─────────────┬───────────────┘│
+                                    │          Yes │     No           │
+                                    │    ┌─────────┴─────┬─────────┐  │
+                                    │    ▼               ▼         │  │
+                                    │  ┌──────┐    ┌────────────┐  │  │
+                                    │  │ Skip │    │ Add to     │  │  │
+                                    │  │      │    │ total with │  │  │
+                                    │  │      │    │ factor     │  │  │
+                                    │  └──────┘    └─────┬──────┘  │  │
+                                    │                     │         │  │
+                                    └─────────────────────┼─────────┘  │
+                                                          │
+                                                          ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 7: Calculate Difference   │
+                                    │  diff_hours = used - allowed     │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                        ┌─────────────────────────┐
+                                        │  diff_hours > 0?        │
+                                        └────────────┬────────────┘
+                                                  Yes │     No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               ▼         │
+                              ┌─────────────────┐  ┌─────────────────┐
+                              │  DEMURRAGE      │  │  DESPATCH       │
+                              │  days = diff/24 │  │  days = -diff/24│
+                              │  amount =       │  │  amount =       │
+                              │    days * dem_rate│  │  days * desp_rate│
+                              └────────┬────────┘  └────────┬────────┘
+                                       │                    │
+                                       └──────────┬─────────┘
+                                                  ▼
+                                    ┌─────────────────────────────────┐
+                                    │  STEP 8: Return Results         │
+                                    │  - allowed display              │
+                                    │  - used display                 │
+                                    │  - difference display           │
+                                    │  - demurrage/despatch amount    │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │         END                      │
+                                    └─────────────────────────────────┘
+
+PART 3: IS_EXCLUDED() FUNCTION - DETAILED FLOWCHART
+text
+
+                    ┌─────────────────────────────────────────────────┐
+                    │  FUNCTION is_excluded(datetime, voyage, holidays)│
+                    │  Input: Check datetime, voyage config, holidays │
+                    └─────────────────────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  Get weekday (0=Mon to 6=Sun)   │
+                                    │  Get hour and minute            │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  RULE 1: WEEKEND CHECK          │
+                                    │  Is Friday after 17:00?         │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                Yes   │   No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               │         │
+                                    ┌─────────────┐         │         │
+                                    │  RETURN TRUE│         │         │
+                                    │  (Excluded) │         │         │
+                                    └─────────────┘         │         │
+                                                            ▼
+                                    ┌─────────────────────────────────┐
+                                    │  Is Saturday? (weekday == 5)    │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                Yes   │   No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               │         │
+                                    ┌─────────────┐         │         │
+                                    │  RETURN TRUE│         │         │
+                                    └─────────────┘         │         │
+                                                            ▼
+                                    ┌─────────────────────────────────┐
+                                    │  Is Sunday before 08:00?        │
+                                    │  (weekday == 6 AND hour < 8)    │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                Yes   │   No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               │         │
+                                    ┌─────────────┐         │         │
+                                    │  RETURN TRUE│         │         │
+                                    └─────────────┘         │         │
+                                                            ▼
+                                    ┌─────────────────────────────────┐
+                                    │  RULE 2: HOLIDAY CHECK          │
+                                    │  For each holiday in holidays:  │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                    ┌─────────────────────────────────┐
+                                    │  Is date == holiday_date?       │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                Yes   │   No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               │         │
+                                    ┌─────────────────────┐│         │
+                                    │ full_day_exclusion? ││         │
+                                    └──────────┬──────────┘│         │
+                                            Yes │     No     │         │
+                                        ┌───────┴─────┬─────┘         │
+                                        ▼             ▼               │
+                                ┌─────────────┐ ┌─────────────┐       │
+                                │ RETURN TRUE │ │ Continue    │       │
+                                └─────────────┘ │ check pre/  │       │
+                                                │ post holiday│       │
+                                                └──────┬──────┘       │
+                                                       │               │
+                                                       ▼               │
+                                    ┌─────────────────────────────────┐
+                                    │  Check pre-holiday exclusion    │
+                                    │  (day before holiday >= 17:00)  │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                Yes   │   No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               │         │
+                                    ┌─────────────┐         │         │
+                                    │ RETURN TRUE │         │         │
+                                    └─────────────┘         │         │
+                                                            ▼
+                                    ┌─────────────────────────────────┐
+                                    │  Check post-holiday exclusion   │
+                                    │  (day after holiday < 08:00)    │
+                                    └─────────────────┬───────────────┘
+                                                      │
+                                                Yes   │   No
+                                            ┌─────────┴─────┬─────────┐
+                                            ▼               │         │
+                                    ┌─────────────┐         │         │
+                                    │ RETURN TRUE │         │         │
+                                    └─────────────┘         │         │
+                                                            ▼
+                                    ┌─────────────────────────────────┐
+                                    │         RETURN FALSE            │
+                                    │         (Time counts)           │
+                                    └─────────────────────────────────┘
+
+PART 4: COMPLETE EQUATIONS SUITE
+EQUATION SET 1: TIME CONVERSION
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 1.1: Days to Hours                                            │
+│  hours = days × 24                                                      │
+│  Example: 7.6921 days = 7.6921 × 24 = 184.61 hours                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│  EQUATION 1.2: Hours to Days                                            │
+│  days = hours ÷ 24                                                      │
+│  Example: 890.17 hours = 890.17 ÷ 24 = 37.0904 days                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│  EQUATION 1.3: Decimal Hours to Days/Hours/Minutes                      │
+│  days = floor(hours ÷ 24)                                               │
+│  remainder_hours = hours - (days × 24)                                  │
+│  hrs = floor(remainder_hours)                                           │
+│  minutes = (remainder_hours - hrs) × 60                                 │
+│  Example: 184.61 hours = 7 days, 16 hours, 37 minutes                   │
+│  184.61 ÷ 24 = 7.6921 → days = 7                                        │
+│  remainder = 184.61 - 168 = 16.61 hours                                 │
+│  hrs = 16, minutes = 0.61 × 60 = 36.6 ≈ 37                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 2: LAYTIME ALLOWED
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 2.1: Basic Laytime Allowed                                    │
+│                                                                         │
+│  ALLOWED_HOURS = (PARTIAL_CARGO_MT ÷ DISCHARGE_RATE_MT_PER_DAY) × 24    │
+│                                                                         │
+│  Variables:                                                             │
+│  - PARTIAL_CARGO_MT = Quantity for specific consignee (MT)              │
+│  - DISCHARGE_RATE_MT_PER_DAY = Contractual rate (MT/day)                │
+│                                                                         │
+│  Example:                                                               │
+│  ALLOWED_HOURS = (38,460.52 ÷ 5,000) × 24                               │
+│                = 7.692104 × 24                                          │
+│                = 184.6105 hours                                         │
+│                = 7 days, 16 hours, 37 minutes                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 2.2: Laytime Allowed with Multiple Consignees                 │
+│                                                                         │
+│  For voyage with multiple partial cargoes:                              │
+│                                                                         │
+│  ALLOWED_HOURS_CONSIGNEE_X = (CARGO_X_MT ÷ DAILY_RATE) × 24             │
+│                                                                         │
+│  Note: Laytime clock starts same for all, but allowed time differs      │
+│                                                                         │
+│  Example from your data:                                                │
+│  Akij Flour: ALLOWED = (25,600.48 ÷ 5,000) × 24 = 122.88 hours          │
+│  Nabil Auto:  ALLOWED = (38,460.52 ÷ 5,000) × 24 = 184.61 hours         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 3: LAYTIME USED
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 3.1: Basic Laytime Used (Discrete Events)                     │
+│                                                                         │
+│  USED_HOURS = Σ [ (END_TIME_i - START_TIME_i) × FACTOR_i ]              │
+│              for all events where NOT excluded                          │
+│                                                                         │
+│  Where:                                                                 │
+│  - END_TIME_i, START_TIME_i in hours                                    │
+│  - FACTOR_i = 0, 0.6, or 1.0                                           │
+│  - Exclusion determined by weekend/holiday rules                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 3.2: Laytime Used with Continuous Time Checking               │
+│                                                                         │
+│  USED_HOURS = Σ Σ [ Δt × FACTOR_event × I_excluded ]                    │
+│               over events over time intervals                           │
+│                                                                         │
+│  Where:                                                                 │
+│  - Δt = time interval (typically 0.25 hours or 15 minutes)              │
+│  - I_excluded = 0 if time is excluded, 1 if time counts                │
+│  - FACTOR_event = factor from SOF event                                 │
+│                                                                         │
+│  Algorithm:                                                             │
+│  For each event:                                                        │
+│    For time = event_start to event_end step 15min:                      │
+│      IF NOT is_excluded(time):                                          │
+│        USED_HOURS += 0.25 × event.factor                                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 3.3: Weighted Laytime Used with Multiple Gangs                │
+│                                                                         │
+│  When multiple gangs working with different capacities:                 │
+│                                                                         │
+│  FACTOR_effective = (Gangs_working ÷ Total_gangs_available)             │
+│                                                                         │
+│  Example: 2 gangs working, 4 total available = 0.5 factor               │
+│           1 gang idle, 1 gang working = 0.5 factor (your data shows 0.6)│
+│                                                                         │
+│  Note: Industry standard uses 0.6 for 1/2 gangs, 0.3 for 1/4 gangs     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 4: EXCLUSION RULES
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 4.1: Weekend Exclusion (FHEX - Friday 17:00 to Sunday 08:00)  │
+│                                                                         │
+│  EXCLUDED_WEEKEND(time) = TRUE IF:                                      │
+│    (weekday = 5 AND time ≥ 17:00)    // Friday 17:00 onward            │
+│    OR (weekday = 6)                  // Saturday all day               │
+│    OR (weekday = 0 AND time < 08:00) // Sunday before 08:00            │
+│                                                                         │
+│  Where weekday: 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday,          │
+│                 4=Friday, 5=Saturday, 6=Sunday                          │
+│                                                                         │
+│  Example: 2026-01-23 (Friday) 18:00 → EXCLUDED = TRUE                   │
+│           2026-01-24 (Saturday) 12:00 → EXCLUDED = TRUE                 │
+│           2026-01-25 (Sunday) 07:30 → EXCLUDED = TRUE                   │
+│           2026-01-25 (Sunday) 09:00 → EXCLUDED = FALSE                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 4.2: Holiday Exclusion                                        │
+│                                                                         │
+│  EXCLUDED_HOLIDAY(date) = TRUE IF:                                      │
+│    date IN holidays_table                                              │
+│                                                                         │
+│  With extended rules:                                                   │
+│  EXCLUDED_EXTENDED(date, time) = TRUE IF:                               │
+│    (date IN holidays AND holiday.full_day = TRUE)                       │
+│    OR (date = holiday - 1 AND time ≥ 17:00 AND holiday.pre = TRUE)      │
+│    OR (date = holiday + 1 AND time < 08:00 AND holiday.post = TRUE)     │
+│                                                                         │
+│  Example: Holiday on 2026-02-11:                                        │
+│  - 2026-02-11 00:00 to 24:00 → EXCLUDED                                 │
+│  - 2026-02-10 17:00 to 24:00 → EXCLUDED (pre-holiday)                  │
+│  - 2026-02-12 00:00 to 08:00 → EXCLUDED (post-holiday)                 │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 4.3: Event-Based Exclusion                                    │
+│                                                                         │
+│  EXCLUDED_EVENT(narration) = TRUE IF narration CONTAINS:                │
+│    "awaiting" OR "suspended" OR "turning" OR "shifting" OR              │
+│    "waiting for barge" OR "waiting for lighter" OR                      │
+│    "crane under maintenance" OR "ramadan" OR "holiday"                  │
+│                                                                         │
+│  FACTOR_AUTO(narration) =                                               │
+│    0.0 IF EXCLUDED_EVENT = TRUE                                         │
+│    0.6 IF narration CONTAINS "discharging operation"                    │
+│    1.0 IF narration CONTAINS "on demurrage" OR "completed"              │
+│    0.0 DEFAULT                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 5: FACTOR APPLICATION
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 5.1: Standard Industry Factors                                │
+│                                                                         │
+│  FACTOR = 1.0  → Full counting                                          │
+│    - Normal discharge operations                                        │
+│    - When vessel on demurrage                                           │
+│    - All time counts regardless of interruptions                        │
+│                                                                         │
+│  FACTOR = 0.6  → Pro-rata counting (60%)                                │
+│    - One out of two gangs working                                       │
+│    - Interrupted operations                                             │
+│    - Partial cargo discharge for one consignee                          │
+│                                                                         │
+│  FACTOR = 0.0  → No counting                                            │
+│    - Weather delays                                                     │
+│    - Waiting for barge/lighter                                          │
+│    - Vessel turning/shifting                                            │
+│    - Weekends and holidays                                              │
+│    - Equipment breakdown                                                │
+│    - Ramadan breaks                                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 5.2: Factor Calculation for Multiple Consignees               │
+│                                                                         │
+│  When discharging cargo for multiple consignees:                        │
+│                                                                         │
+│  FACTOR_CONSIGNEE_X = (Gangs_allocated_to_X ÷ Total_gangs)              │
+│                                                                         │
+│  Example from your data:                                                │
+│  - Total gangs: 2                                                       │
+│  - Akij Flour: 1 gang → FACTOR = 0.5 (but used 0.6 in calc)            │
+│  - Nabil Auto: 1 gang → FACTOR = 0.5 (but used 0.6 in calc)            │
+│                                                                         │
+│  Note: 0.6 is industry standard for "1 out of 2 gangs" due to           │
+│  efficiency factors and standby time                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 6: DEMURRAGE & DESPATCH
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 6.1: Demurrage Calculation                                    │
+│                                                                         │
+│  IF USED_HOURS > ALLOWED_HOURS:                                         │
+│                                                                         │
+│    DEMURRAGE_HOURS = USED_HOURS - ALLOWED_HOURS                         │
+│    DEMURRAGE_DAYS = DEMURRAGE_HOURS ÷ 24                                │
+│    DEMURRAGE_AMOUNT = DEMURRAGE_DAYS × DEMURRAGE_RATE_PER_DAY           │
+│                                                                         │
+│  Example:                                                               │
+│    USED_HOURS = 890.17                                                  │
+│    ALLOWED_HOURS = 184.61                                               │
+│    DEMURRAGE_HOURS = 705.56                                             │
+│    DEMURRAGE_DAYS = 705.56 ÷ 24 = 29.3983                               │
+│    DEMURRAGE_AMOUNT = 29.3983 × $20,000 = $587,966.67                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 6.2: Despatch Calculation                                     │
+│                                                                         │
+│  IF USED_HOURS < ALLOWED_HOURS:                                         │
+│                                                                         │
+│    DESPATCH_HOURS = ALLOWED_HOURS - USED_HOURS                          │
+│    DESPATCH_DAYS = DESPATCH_HOURS ÷ 24                                  │
+│    DESPATCH_AMOUNT = DESPATCH_DAYS × DESPATCH_RATE_PER_DAY              │
+│                                                                         │
+│  Note: Despatch rate is typically 50% of demurrage rate                 │
+│                                                                         │
+│  Example:                                                               │
+│    USED_HOURS = 100.00                                                  │
+│    ALLOWED_HOURS = 184.61                                               │
+│    DESPATCH_HOURS = 84.61                                               │
+│    DESPATCH_DAYS = 84.61 ÷ 24 = 3.5254                                  │
+│    DESPATCH_AMOUNT = 3.5254 × $10,000 = $35,254.17 (refund to charterer)│
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 6.3: Demurrage with Proportional Cargo                        │
+│                                                                         │
+│  When demurrage is shared among multiple consignees:                    │
+│                                                                         │
+│  DEMURRAGE_SHARE_X = TOTAL_DEMURRAGE × (CARGO_X_MT ÷ TOTAL_CARGO_MT)    │
+│                                                                         │
+│  Example:                                                               │
+│    Total Demurrage = $587,967                                           │
+│    Nabil Cargo = 38,460.52 MT                                           │
+│    Total Cargo = 64,061.00 MT                                           │
+│    Nabil Share = 587,967 × (38,460.52 ÷ 64,061)                        │
+│                = 587,967 × 0.6004                                       │
+│                = $353,000 (approx)                                      │
+│                                                                         │
+│  Note: Your PDF shows Nabil paid full demurrage, meaning they were      │
+│  the sole cause of delay                                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 7: TIME CALCULATION DETAILS
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 7.1: Duration Between Two Times                               │
+│                                                                         │
+│  DURATION_HOURS = (END_HOURS + (END_DAYS × 24)) -                       │
+│                   (START_HOURS + (START_DAYS × 24))                     │
+│                                                                         │
+│  Example: 2026-01-20 08:00 to 2026-01-22 17:00                         │
+│    START = (20 × 24) + 8 = 488 hours                                    │
+│    END = (22 × 24) + 17 = 545 hours                                     │
+│    DURATION = 545 - 488 = 57 hours                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 7.2: Partial Day Calculation                                  │
+│                                                                         │
+│  For laytime allowed when cargo is partial:                             │
+│                                                                         │
+│  LAYTIME_ALLOWED_DAYS = PARTIAL_CARGO_MT ÷ DISCHARGE_RATE_MT_PER_DAY    │
+│                                                                         │
+│  Example:                                                               │
+│    38,460.52 ÷ 5,000 = 7.692104 days                                    │
+│    7.692104 days = 7 days + 0.692104 days                               │
+│    0.692104 × 24 = 16.6105 hours                                        │
+│    16.6105 hours = 16 hours + 0.6105 hours                              │
+│    0.6105 × 60 = 36.63 minutes ≈ 37 minutes                             │
+│    Result: 7 days, 16 hours, 37 minutes                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EQUATION SET 8: DATA VALIDATION
+text
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 8.1: Event Overlap Check                                      │
+│                                                                         │
+│  OVERLAP_EXISTS = TRUE IF:                                              │
+│    event1.start < event2.end AND event1.end > event2.start              │
+│                                                                         │
+│  For database integrity:                                                │
+│    No two events should overlap for same voyage                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EQUATION 8.2: Cargo Balance Check                                      │
+│                                                                         │
+│  TOTAL_DISCHARGED_MT = Σ [ (discharge_rate × hours_worked) ]            │
+│                                                                         │
+│  Should equal PARTIAL_CARGO_MT within tolerance (usually 2%)            │
+│                                                                         │
+│  Example:                                                               │
+│    Hours worked = used_hours_without_exclusions                         │
+│    Discharged = 5,000 × (used_hours ÷ 24)                               │
+│    If discharged ≠ partial_cargo_MT, factor may be incorrect           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+PART 5: ALGORITHM PSEUDO-CODE
+ALGORITHM 1: MAIN CALCULATION ENGINE
+text
+
+ALGORITHM CalculateLaytimeDemurrage
+INPUT: voyage_id
+OUTPUT: calculation_results
+
+BEGIN
+    // Load data
+    voyage ← DB.GetVoyage(voyage_id)
+    events ← DB.GetEvents(voyage_id, sort by date, start_time)
+    holidays ← DB.GetHolidays(voyage.nor_tendered.year to voyage.completion.year)
+    
+    // Step 1: Calculate allowed laytime
+    allowed_hours ← (voyage.partial_cargo_mt / voyage.discharge_rate_mt) * 24
+    
+    // Step 2: Initialize tracking variables
+    total_used_hours ← 0
+    on_demurrage ← FALSE
+    demurrage_start_time ← NULL
+    
+    // Step 3: Process each event
+    FOR EACH event IN events:
+        
+        event_start ← DateTime(event.event_date, event.start_time)
+        event_end ← DateTime(event.event_date, event.end_time)
+        
+        // Adjust start time if before NOR acceptance
+        IF event_start < voyage.nor_accepted THEN
+            event_start ← voyage.nor_accepted
+        END IF
+        
+        // Process in 15-minute intervals
+        current_time ← event_start
+        WHILE current_time < event_end:
+            
+            // Determine if this interval counts
+            is_excluded ← CheckExclusions(current_time, voyage, holidays)
+            
+            IF NOT is_excluded THEN
+                // Time counts
+                effective_factor ← event.factor
+                
+                // When on demurrage, factor becomes 1.0
+                IF on_demurrage THEN
+                    effective_factor ← 1.0
+                END IF
+                
+                // Add 15 minutes (0.25 hours) with factor
+                total_used_hours ← total_used_hours + (0.25 * effective_factor)
+            END IF
+            
+            // Check if demurrage started
+            IF NOT on_demurrage AND total_used_hours > allowed_hours THEN
+                on_demurrage ← TRUE
+                demurrage_start_time ← current_time
+            END IF
+            
+            current_time ← current_time + 15 minutes
+        END WHILE
+    END FOR
+    
+    // Step 4: Calculate demurrage/despatch
+    diff_hours ← total_used_hours - allowed_hours
+    
+    IF diff_hours > 0 THEN
+        demurrage_days ← diff_hours / 24
+        amount ← demurrage_days * voyage.demurrage_rate
+        result_type ← "DEMURRAGE"
+    ELSE
+        despatch_days ← ABS(diff_hours) / 24
+        amount ← despatch_days * voyage.despatch_rate
+        result_type ← "DESPATCH"
+    END IF
+    
+    // Step 5: Format and return results
+    RETURN {
+        allowed: FormatTime(allowed_hours),
+        used: FormatTime(total_used_hours),
+        difference: FormatTime(ABS(diff_hours)),
+        type: result_type,
+        days: (diff_hours > 0 ? demurrage_days : despatch_days),
+        amount: amount,
+        on_demurrage_from: demurrage_start_time
+    }
+END
+
+ALGORITHM 2: EXCLUSION CHECKER
+text
+
+ALGORITHM CheckExclusions
+INPUT: check_datetime, voyage, holidays
+OUTPUT: is_excluded (BOOLEAN)
+
+BEGIN
+    weekday ← check_datetime.weekday()  // 0=Mon, 6=Sun
+    hour ← check_datetime.hour
+    minute ← check_datetime.minute
+    time_value ← hour + (minute / 60)
+    
+    // Rule 1: Weekend check (FHEX)
+    // Friday 17:00 to Sunday 08:00
+    IF voyage.week_end_day = "Friday" AND voyage.week_end_time = "17:00" THEN
+        // Friday after 17:00
+        IF weekday = 4 AND time_value >= 17.0 THEN
+            RETURN TRUE
+        END IF
+        
+        // Saturday all day
+        IF weekday = 5 THEN
+            RETURN TRUE
+        END IF
+        
+        // Sunday before 08:00
+        IF weekday = 6 AND time_value < 8.0 THEN
+            RETURN TRUE
+        END IF
+    END IF
+    
+    // Rule 2: Holiday check
+    FOR EACH holiday IN holidays:
+        // Full day exclusion
+        IF holiday.full_day_exclusion AND 
+           check_datetime.date() = holiday.holiday_date THEN
+            RETURN TRUE
+        END IF
+        
+        // Pre-holiday exclusion (17:00 onward)
+        IF holiday.pre_holiday_exclude AND
+           check_datetime.date() = (holiday.holiday_date - 1 day) AND
+           time_value >= 17.0 THEN
+            RETURN TRUE
+        END IF
+        
+        // Post-holiday exclusion (until 08:00)
+        IF holiday.post_holiday_exclude AND
+           check_datetime.date() = (holiday.holiday_date + 1 day) AND
+           time_value < 8.0 THEN
+            RETURN TRUE
+        END IF
+    END FOR
+    
+    // If no rules matched, time is not excluded
+    RETURN FALSE
+END
+
+ALGORITHM 3: AUTO-FACTOR DETECTION
+text
+
+ALGORITHM DetectFactorFromNarration
+INPUT: narration_text (STRING)
+OUTPUT: factor (FLOAT)
+
+BEGIN
+    text ← narration_text.LOWER()
+    
+    // Full counting scenarios (Factor 1.0)
+    IF text CONTAINS "on demurrage" OR
+       text CONTAINS "discharging completed" OR
+       text CONTAINS "all cargo discharging completed" THEN
+        RETURN 1.0
+    END IF
+    
+    // Partial counting scenarios (Factor 0.6)
+    IF text CONTAINS "discharging operation continued" OR
+       text CONTAINS "discharging operation resumed" OR
+       text CONTAINS "discharging operation commenced" THEN
+        
+        // Check for gang idle information
+        IF text CONTAINS "1 gang idle" OR
+           text CONTAINS "one gang idle" THEN
+            RETURN 0.6  // Standard for 1 of 2 gangs
+        END IF
+        
+        RETURN 0.6
+    END IF
+    
+    // Zero counting scenarios (Factor 0.0)
+    IF text CONTAINS "awaiting" OR
+       text CONTAINS "suspended" OR
+       text CONTAINS "turning" OR
+       text CONTAINS "shifting" OR
+       text CONTAINS "waiting for barge" OR
+       text CONTAINS "waiting for lighter" OR
+       text CONTAINS "crane under maintenance" OR
+       text CONTAINS "ramadan sehri" OR
+       text CONTAINS "ramadan iftar" OR
+       text CONTAINS "weekly holiday" OR
+       text CONTAINS "government holiday" OR
+       text CONTAINS "preparation for" THEN
+        RETURN 0.0
+    END IF
+    
+    // Default factor (user must specify)
+    RETURN NULL
+END
+
+ALGORITHM 4: HOLIDAY CRUD OPERATIONS
+text
+
+ALGORITHM ManageHolidays
+OPERATIONS: CREATE, READ, UPDATE, DELETE
+
+CREATE HOLIDAY:
+BEGIN
+    INPUT: holiday_name, holiday_date, full_day, pre_exclude, post_exclude
+    
+    // Validation
+    IF holiday_date < CURRENT_DATE - 1 year THEN
+        ERROR: "Cannot add holiday for past year"
+    END IF
+    
+    IF EXISTS holiday WHERE holiday_date = input_date THEN
+        WARNING: "Holiday already exists. Update instead?"
+    END IF
+    
+    // Save to database
+    DB.Insert("holidays", {
+        holiday_name: holiday_name,
+        holiday_date: holiday_date,
+        full_day_exclusion: full_day,
+        pre_holiday_exclude: pre_exclude,
+        post_holiday_exclude: post_exclude,
+        year: YEAR(holiday_date),
+        created_at: CURRENT_TIMESTAMP
+    })
+    
+    // Recalculate affected voyages
+    affected_voyages ← DB.GetVoyagesByDateRange(holiday_date - 2 days, holiday_date + 2 days)
+    FOR EACH voyage IN affected_voyages:
+        TriggerRecalculation(voyage.id)
+    END FOR
+    
+    RETURN success
+END
+
+DELETE HOLIDAY:
+BEGIN
+    INPUT: holiday_id
+    
+    holiday ← DB.GetHoliday(holiday_id)
+    
+    IF holiday IS NULL THEN
+        ERROR: "Holiday not found"
+    END IF
+    
+    DB.Delete("holidays", WHERE id = holiday_id)
+    
+    // Recalculate affected voyages
+    affected_voyages ← DB.GetVoyagesByDateRange(holiday.holiday_date - 2 days, holiday.holiday_date + 2 days)
+    FOR EACH voyage IN affected_voyages:
+        TriggerRecalculation(voyage.id)
+    END FOR
+    
+    RETURN success
+END
+
+ALGORITHM 5: BATCH SOF EVENT IMPORT
+text
+
+ALGORITHM ImportSOFEvents
+INPUT: file_path (CSV/Excel), voyage_id
+OUTPUT: import_summary
+
+BEGIN
+    data ← ReadFile(file_path)
+    events_imported ← 0
+    errors ← []
+    
+    FOR EACH row IN data:
+        
+        // Parse row data
+        event_date ← ParseDate(row.date)
+        start_time ← ParseTime(row.from)
+        end_time ← ParseTime(row.to)
+        narration ← row.remarks
+        
+        // Validate times
+        IF start_time >= end_time THEN
+            errors.ADD("Invalid time range for row " + row.number)
+            CONTINUE
+        END IF
+        
+        // Auto-detect factor
+        factor ← DetectFactorFromNarration(narration)
+        
+        IF factor IS NULL THEN
+            // Prompt user for factor or use default 0.6
+            factor ← 0.6
+            WARNING("Factor not detected for: " + narration)
+        END IF
+        
+        // Check for overlap with existing events
+        existing ← DB.GetEventsByTimeRange(voyage_id, event_date, start_time, end_time)
+        
+        IF existing.COUNT > 0 THEN
+            errors.ADD("Overlap detected with event " + existing[0].id)
+            CONTINUE
+        END IF
+        
+        // Save event
+        DB.Insert("sof_events", {
+            voyage_id: voyage_id,
+            event_date: event_date,
+            start_time: start_time,
+            end_time: end_time,
+            factor: factor,
+            narration: narration,
+            created_at: CURRENT_TIMESTAMP
+        })
+        
+        events_imported ← events_imported + 1
+    END FOR
+    
+    // Recalculate voyage
+    IF events_imported > 0 THEN
+        TriggerRecalculation(voyage_id)
+    END IF
+    
+    RETURN {
+        imported: events_imported,
+        errors: errors
+    }
+END
+
+PART 6: STATE TRANSITION DIAGRAM
+text
+
+                    ┌─────────────────────────────────────────────────────────────────┐
+                    │                    VOYAGE LIFECYCLE                              │
+                    └─────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+    │   CREATED    │─────▶│  NOR ISSUED  │─────▶│  NOR ACCEPT  │─────▶│  DISCHARGING │
+    │              │      │              │      │              │      │              │
+    │ - Data entry │      │ - Waiting    │      │ - Laytime    │      │ - Operation  │
+    │ - Parameters │      │ - Inactive   │      │   clock      │      │   active     │
+    │   set        │      │              │      │   starts     │      │              │
+    └──────────────┘      └──────────────┘      └──────────────┘      └──────┬───────┘
+                                                                              │
+                                                                              ▼
+                                    ┌─────────────────────────────────────────────────┐
+                                    │                                                 │
+                                    │           ┌──────────────┐                      │
+                                    │           │ ON DEMURRAGE │                      │
+                                    │           │              │                      │
+                                    │           │ - Full time  │                      │
+                                    │           │   counts     │                      │
+                                    │           │ - Factor = 1 │                      │
+                                    │           └──────┬───────┘                      │
+                                    │                  │                              │
+                                    │                  │ used > allowed               │
+                                    │                  │                              │
+                                    └──────────────────┼──────────────────────────────┘
+                                                       │
+                                                       ▼
+                                              ┌──────────────┐
+                                              │  COMPLETED   │
+                                              │              │
+                                              │ - All cargo  │
+                                              │   discharged │
+                                              │ - Final calc │
+                                              └──────────────┘
+
+PART 7: DATA FLOW DIAGRAM (LEVEL 0)
+text
+
+                                    ┌─────────────────────────────────────────────────┐
+                                    │                  USER                             │
+                                    └───────────┬─────────────────┬───────────────────┘
+                                                │                 │
+                        ┌───────────────────────┼─────────────────┼───────────────────────┐
+                        │                       │                 │                       │
+                        ▼                       ▼                 ▼                       ▼
+                ┌─────────────┐         ┌─────────────┐     ┌─────────────┐         ┌─────────────┐
+                │ Voyage Data │         │ SOF Events  │     │  Holidays   │         │  Calculate  │
+                └──────┬──────┘         └──────┬──────┘     └──────┬──────┘         └──────┬──────┘
+                       │                       │                 │                       │
+                       ▼                       ▼                 ▼                       ▼
+                ┌─────────────────────────────────────────────────────────────────────────────┐
+                │                                                                             │
+                │                         DATABASE (PostgreSQL/SQLite)                        │
+                │                                                                             │
+                │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+                │  │  voyages     │  │ sof_events   │  │  holidays    │  │ calculations│   │
+                │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
+                │                                                                             │
+                └─────────────────────────────────────────────────────────────────────────────┘
+                                                │
+                                                │
+                                                ▼
+                                    ┌─────────────────────────────────────────────────┐
+                                    │              CALCULATION ENGINE                  │
+                                    │                                                   │
+                                    │  ┌─────────────────────────────────────────────┐ │
+                                    │  │ 1. Load voyage                               │ │
+                                    │  │ 2. Load events                               │ │
+                                    │  │ 3. Load holidays                             │ │
+                                    │  │ 4. Calculate allowed                         │ │
+                                    │  │ 5. Calculate used (with exclusions)          │ │
+                                    │  │ 6. Calculate demurrage/despatch              │ │
+                                    │  └─────────────────────────────────────────────┘ │
+                                    └─────────────────────────────────────────────────┘
+                                                │
+                                                │
+                                                ▼
+                                    ┌─────────────────────────────────────────────────┐
+                                    │                   OUTPUTS                         │
+                                    │                                                   │
+                                    │  ┌──────────────┐  ┌──────────────┐              │
+                                    │  │ SOF Summary  │  │ Calculation  │              │
+                                    │  │ Sheet        │  │ Sheet        │              │
+                                    │  └──────────────┘  └──────────────┘              │
+                                    │                                                   │
+                                    │  ┌──────────────┐  ┌──────────────┐              │
+                                    │  │ Demurrage    │  │ Invoice      │              │
+                                    │  │ Report       │  │ PDF          │              │
+                                    │  └──────────────┘  └──────────────┘              │
+                                    └─────────────────────────────────────────────────┘
+
+PART 8: QUICK REFERENCE CARD
+text
+
+╔═══════════════════════════════════════════════════════════════════════════════════════╗
+║                         LAYTIME CALCULATOR - QUICK REFERENCE                            ║
+╠═══════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                        ║
+║  ┌─────────────────────────────────────────────────────────────────────────────────┐  ║
+║  │  EQUATION 1: ALLOWED LAYTIME                                                     │  ║
+║  │  allowed_hours = (partial_cargo_mt ÷ discharge_rate_mt) × 24                     │  ║
+║  └─────────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                        ║
+║  ┌─────────────────────────────────────────────────────────────────────────────────┐  ║
+║  │  EQUATION 2: USED LAYTIME                                                         │  ║
+║  │  used_hours = Σ [duration × factor] for all non-excluded periods                │  ║
+║  └─────────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                        ║
+║  ┌─────────────────────────────────────────────────────────────────────────────────┐  ║
+║  │  EQUATION 3: DEMURRAGE                                                           │  ║
+║  │  IF used > allowed: demurrage = ((used - allowed) ÷ 24) × demurrage_rate         │  ║
+║  └─────────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                        ║
+║  ┌─────────────────────────────────────────────────────────────────────────────────┐  ║
+║  │  EQUATION 4: EXCLUSION RULES (FHEX)                                              │  ║
+║  │  Friday 17:00 → Sunday 08:00 = NO COUNT                                          │  ║
+║  └─────────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                        ║
+║  ┌─────────────────────────────────────────────────────────────────────────────────┐  ║
+║  │  FACTOR REFERENCE:                                                               │  ║
+║  │  1.0 = Full count (normal ops, on demurrage)                                     │  ║
+║  │  0.6 = Partial count (1 of 2 gangs, interrupted)                                │  ║
+║  │  0.0 = No count (waiting, holidays, turning, shifting)                          │  ║
+║  └─────────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                        ║
+║  ┌─────────────────────────────────────────────────────────────────────────────────┐  ║
+║  │  EXAMPLE (Your TOMAROS Data):                                                    │  ║
+║  │                                                                                  │  ║
+║  │  Partial Cargo: 38,460.52 MT                                                     │  ║
+║  │  Rate: 5,000 MT/day                                                              │  ║
+║  │  Allowed: 184.61 hours (7d 16h 37m)                                              │  ║
+║  │  Used: 890.17 hours (37d 2h 10m)                                                 │  ║
+║  │  Demurrage: 705.56 hours (29.4 days) × $20,000 = $588,000                        │  ║
+║  └─────────────────────────────────────────────────────────────────────────────────┘  ║
+║                                                                                        ║
+╚═══════════════════════════════════════════════════════════════════════════════════════╝

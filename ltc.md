@@ -55,9 +55,9 @@ This document ties the sample **Laytime2000 / charterer laytime** layouts you sh
 - [x] `laytime-calculation.service.ts` — pass allowed; fix used/excluded/balance/dispatch; build chronology; apply CP **counting fraction** after calendar.
 - [x] `laytime-counting-fraction.ts` — resolve explicit fraction vs `workableHatches / totalHatches`; scale segment `countingHours` (skips when event has explicit impact).
 - [x] `import_contracts` — `laytime_counting_fraction`, `workable_hatches`, `total_hatches` + PATCH API + **Import contract laytime** form.
-- [x] `laytime-chronology.ts` — day-split rows + on-dem accumulation.
+- [x] `laytime-chronology.ts` — split chronology slice at **laytime expiry** with **Laytime expires…** remark; running totals unchanged in substance.
 - [x] `laytime-mother-daily-ledger.ts` — demurrage vs cumulative **working** hours.
-- [x] `mother-laytime-timesheet-table.tsx` — chronology table; **Frac** strip + contract reference block.
+- [x] `mother-laytime-timesheet-table.tsx` — Laytime2000-style **statement summary** (d-h-m + 5dp days × rate), **port statement** block, chronology + Frac strip + contract details.
 - [x] Frontend / API types in `sof-api.ts` and `import-contracts-api.ts`.
 - [x] Unit tests for OODDA calendar path and counting fraction helpers.
 
@@ -66,6 +66,6 @@ This document ties the sample **Laytime2000 / charterer laytime** layouts you sh
 1. Link SOF to vessel call; set **laytime time zone** (IANA).
 2. Enter **import contract** (rate, excluded days, optional week marker line, demurrage/dispatch rates). Optionally set **Fraction (0–1)** or **workable / total hatches** (explicit fraction wins) for Laytime2000-style **Frac** on credited hours after the weekday calendar.
 3. Record **SOF events** in chronological order; use **Normal** for time that counts and **Hold** for interruptions; use **laytime impact hours** when the charter fixes credited hours for an event (that bypasses hatch/fraction scaling).
-4. Open **Laytime** tab → **Recalculate** — review **daily sheet**, **SOF event segments**, and **Port chronology (Laytime2000-style)**.
+4. Open **Laytime** tab → **Recalculate** — review the **Laytime worksheet**: statement summary (Laytime2000-style `Xd-XXh-XXm` + decimal days × rate), daily ledger, **port statement** (vessel / NOR / commence) with chronology (including **Laytime expires…** at the allowance), then SOF segments. Optional “Summary…” collapsible for legend and contract detail.
 
 **Database:** apply migration `20260514120000_import_contract_laytime_counting_fraction` (then `npx prisma generate` if your environment supports it).

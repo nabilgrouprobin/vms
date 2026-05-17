@@ -257,7 +257,7 @@ export class SofRepository {
           id: string;
           name: string;
           scope: import("@prisma/client").SofEventTypeScope;
-          category: "NORMAL" | "HOLD_DELAY";
+          category: "NORMAL" | "HOLD_DELAY" | "PREPARATION";
         }
       | null
     >;
@@ -656,7 +656,8 @@ export class SofRepository {
       hourlyStatuses: {
         orderBy: [{ hourStartAt: "desc" }, { id: "desc" }],
         take: 24
-      }
+      },
+      laytimeHolidays: { orderBy: [{ sortOrder: "asc" }, { holidayStartAt: "asc" }] }
     };
   }
 
@@ -665,6 +666,7 @@ export class SofRepository {
       vesselCall: {
         select: this.getVesselCallDetailSelect()
       },
+      laytimeHolidays: { orderBy: [{ sortOrder: "asc" }, { holidayStartAt: "asc" }] },
       events: {
         orderBy: [{ eventTime: "desc" }, { id: "desc" }],
         take: 25,

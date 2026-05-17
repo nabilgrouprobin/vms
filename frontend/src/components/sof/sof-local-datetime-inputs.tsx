@@ -10,6 +10,69 @@ import {
 } from "@/lib/sof-event-display";
 import { cn } from "@/lib/utils";
 
+export type SofTime24InputProps = {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  className?: string;
+  id?: string;
+  "aria-label"?: string;
+  placeholder?: string;
+};
+
+/** Standalone 24-hour clock (`HH:mm` text). No native `type="time"` (avoids AM/PM pickers). */
+export function SofTime24Input({
+  value,
+  onChange,
+  disabled,
+  className,
+  id,
+  "aria-label": ariaLabel = "Time, 24-hour HH:mm",
+  placeholder = "HH:mm"
+}: SofTime24InputProps) {
+  const [timeDraft, setTimeDraft] = useState(value);
+
+  useEffect(() => {
+    setTimeDraft(value);
+  }, [value]);
+
+  return (
+    <Input
+      id={id}
+      type="text"
+      disabled={disabled}
+      className={cn("w-[6.25rem] font-mono text-sm tabular-nums", className)}
+      value={timeDraft}
+      placeholder={placeholder}
+      title="24-hour time only (no AM/PM), e.g. 09:00 or 17:30"
+      inputMode="numeric"
+      autoComplete="off"
+      spellCheck={false}
+      maxLength={5}
+      aria-label={ariaLabel}
+      onChange={(e) => {
+        const next = e.target.value.replace(/[^\d:]/g, "").slice(0, 5);
+        setTimeDraft(next);
+        const instant =
+          /^\d{2}:\d{2}$/.test(next) || /^\d{4}$/.test(next) ? parseHourMinute24Input(next) : null;
+        if (instant) {
+          setTimeDraft(instant);
+          onChange(instant);
+        }
+      }}
+      onBlur={() => {
+        const parsed = parseHourMinute24Input(timeDraft);
+        if (parsed) {
+          setTimeDraft(parsed);
+          onChange(parsed);
+        } else {
+          setTimeDraft(value);
+        }
+      }}
+    />
+  );
+}
+
 export type SofLocalDatetimeInputsProps = {
   value: string;
   onChange: (v: string) => void;
@@ -50,38 +113,14 @@ export function SofLocalDatetimeInputs({
       <span className="select-none text-xs text-muted-foreground" aria-hidden>
         ·
       </span>
-      <Input
-        type="text"
+      <SofTime24Input
         disabled={disabled || !date}
-        className={cn("w-[6.25rem] min-h-10 font-mono text-sm tabular-nums", timeInputClassName)}
+        className={cn("min-h-10", timeInputClassName)}
         value={date ? timeDraft : ""}
-        placeholder="HH:mm"
-        title="24-hour time only (no AM/PM), e.g. 09:00 or 17:30"
-        inputMode="numeric"
-        autoComplete="off"
-        spellCheck={false}
-        maxLength={5}
-        aria-label="Time, 24-hour HH:mm"
-        onChange={(e) => {
-          const next = e.target.value.replace(/[^\d:]/g, "").slice(0, 5);
-          setTimeDraft(next);
+        onChange={(instant) => {
           if (!date) return;
-          const instant =
-            /^\d{2}:\d{2}$/.test(next) || /^\d{4}$/.test(next) ? parseHourMinute24Input(next) : null;
-          if (instant) {
-            setTimeDraft(instant);
-            onChange(mergeLocalDatetimeParts(date, instant));
-          }
-        }}
-        onBlur={() => {
-          if (!date) return;
-          const parsed = parseHourMinute24Input(timeDraft);
-          if (parsed) {
-            setTimeDraft(parsed);
-            onChange(mergeLocalDatetimeParts(date, parsed));
-          } else {
-            setTimeDraft(time);
-          }
+          setTimeDraft(instant);
+          onChange(mergeLocalDatetimeParts(date, instant));
         }}
       />
     </div>

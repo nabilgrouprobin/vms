@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SofLaytimeCountToggle } from "@/components/sof/sof-laytime-count-toggle";
 import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { formatDt } from "@/lib/format";
@@ -30,9 +31,13 @@ function rowTypeLabel(ev: SofEventListItem): string {
 }
 
 /** Category from the event type definition (authoritative); falls back to `isHold` if missing. */
-function rowCategoryFromEventType(ev: SofEventListItem): { label: "Hold" | "Normal"; isHold: boolean } {
+function rowCategoryFromEventType(ev: SofEventListItem): {
+  label: "Hold" | "Normal" | "Prep";
+  isHold: boolean;
+} {
   const cat = ev.eventTypeDefinition?.category;
   if (cat === "HOLD_DELAY") return { label: "Hold", isHold: true };
+  if (cat === "PREPARATION") return { label: "Prep", isHold: false };
   if (cat === "NORMAL") return { label: "Normal", isHold: false };
   return ev.isHold ? { label: "Hold", isHold: true } : { label: "Normal", isHold: false };
 }
@@ -42,6 +47,61 @@ function escapeCsvCell(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
+}
+
+function EventsTableLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/15 px-2 py-1 text-[10px] text-muted-foreground">
+      <span className="font-semibold text-foreground">Events</span>
+      <span>
+        Tag each period in contact time as{" "}
+        <span className="font-medium text-emerald-700 dark:text-emerald-400">Count</span> or{" "}
+        <span className="font-medium text-foreground">Not count</span> on the laytime daily sheet.
+        Default is Count.
+      </span>
+    </div>
+  );
+}
+
+function EventTh({
+  children,
+  className,
+  align = "left"
+}: {
+  children: ReactNode;
+  className?: string;
+  align?: "left" | "right" | "center";
+}) {
+  return (
+    <th
+      className={cn(
+        "px-2 py-1 text-[10px] font-semibold text-foreground whitespace-nowrap",
+        align === "right" && "text-right",
+        align === "center" && "text-center",
+        align === "left" && "text-left",
+        className
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+
+function EventCategoryBadge({ isHold, label }: { isHold: boolean; label: string }) {
+  const short =
+    label === "Hold" ? "Hold" : label === "Prep" ? "Prep" : "Norm";
+  if (isHold) {
+    return (
+      <span className="inline-flex shrink-0 items-center rounded-full border border-amber-500/70 bg-amber-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-400/60 dark:bg-amber-950/40 dark:text-amber-100">
+        {short}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-background px-1.5 py-px text-[9px] font-medium text-muted-foreground">
+      {short}
+    </span>
+  );
 }
 
 type EventRow = {
@@ -74,9 +134,12 @@ type SofEventsTableProps = {
   /** If set, shows Export CSV when there is at least one event (safe filename fragment). */
   eventsCsvBasename?: string;
   /** e.g. invalidate SOF detail after event CRUD */
-  onEventsChanged?: () => void;
+  /** Called after event CRUD; await recalc when laytime should refresh. */
+  onEventsChanged?: () => void | Promise<void>;
   /** When false, hides the Category column (Hold vs Normal from event type). Default true. */
   showStatusColumn?: boolean;
+  /** To count / not to count laytime toggle per event. Default true. */
+  showLaytimeCountColumn?: boolean;
   /**
    * When provided, gap rows render a "Fill gap" button that calls back with
    * the gap's [start, end] ISO strings. Hidden in read-only mode.
@@ -108,6 +171,7 @@ export function SofEventsTable({
   eventsCsvBasename,
   onEventsChanged,
   showStatusColumn = true,
+  showLaytimeCountColumn = true,
   onFillGap,
   fillGapPreparing = false,
   hasUnloadedHistory = false
@@ -125,6 +189,7 @@ export function SofEventsTable({
   const [editStartTime, setEditStartTime] = useState("");
   const [editHoldReason, setEditHoldReason] = useState("");
   const [editRemarks, setEditRemarks] = useState("");
+  const [editCountsAsLaytime, setEditCountsAsLaytime] = useState(true);
   const [editErr, setEditErr] = useState<string | null>(null);
 
   const sortedAsc = useMemo(() => sortSofEventsChronoAsc(events), [events]);
@@ -188,16 +253,32 @@ export function SofEventsTable({
     setEditStartTime(ownWindow.fromIso ? toDatetimeLocalValue(ownWindow.fromIso) : "");
     setEditHoldReason(ev.holdReason ?? "");
     setEditRemarks(ev.remarks ?? "");
+    setEditCountsAsLaytime(ev.countsAsLaytime !== false);
     setEditErr(null);
   };
+
+  const countMut = useMutation({
+    mutationFn: ({
+      eventId,
+      countsAsLaytime
+    }: {
+      eventId: string;
+      countsAsLaytime: boolean;
+    }) => updateSofEvent(eventId, { countsAsLaytime }),
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: [...eventsQueryKey] });
+      await onEventsChanged?.();
+    },
+    onError: (e) => toast.error(parseApiErr(e))
+  });
 
   const updMut = useMutation({
     mutationFn: ({ eventId, body }: { eventId: string; body: Record<string, unknown> }) =>
       updateSofEvent(eventId, body),
-    onSuccess: () => {
+    onSuccess: async () => {
       setEdit(null);
-      void qc.invalidateQueries({ queryKey: [...eventsQueryKey] });
-      onEventsChanged?.();
+      await qc.refetchQueries({ queryKey: [...eventsQueryKey] });
+      await onEventsChanged?.();
     },
     onError: (e) => setEditErr(parseApiErr(e))
   });
@@ -210,6 +291,7 @@ export function SofEventsTable({
       "Length",
       "Type",
       "Category",
+      "Laytime count",
       "Created by",
       "Remarks",
       "ROB MT",
@@ -239,6 +321,7 @@ export function SofEventsTable({
         row.durationLabel,
         rowTypeLabel(row.ev),
         rowCategoryFromEventType(row.ev).label,
+        row.ev.countsAsLaytime !== false ? "Count" : "Not count",
         row.ev.createdByUser.fullName,
         row.ev.remarks ?? "",
         row.ev.robQuantityMt ?? "",
@@ -269,8 +352,8 @@ export function SofEventsTable({
   const delMut = useMutation({
     mutationFn: (eventId: string) => deleteSofEvent(eventId),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: [...eventsQueryKey], refetchType: "active" });
-      onEventsChanged?.();
+      await qc.refetchQueries({ queryKey: [...eventsQueryKey] });
+      await onEventsChanged?.();
       toast.success("Event deleted");
     },
     onError: (e) => toast.error(parseApiErr(e))
@@ -284,11 +367,11 @@ export function SofEventsTable({
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1.5">
-            <CardTitle>Events</CardTitle>
-            <CardDescription>
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-col gap-2 space-y-0 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-0.5">
+            <CardTitle className="text-sm font-semibold">Events</CardTitle>
+            <CardDescription className="text-[10px] leading-snug">
               {listNote}
               {hasUnloadedHistory ? (
                 <>
@@ -307,81 +390,104 @@ export function SofEventsTable({
               type="button"
               variant="outline"
               size="sm"
-              className="w-full shrink-0 gap-2 sm:w-auto"
+              className="h-7 gap-1.5 px-2 text-[11px] w-full shrink-0 sm:w-auto"
               onClick={downloadCsv}
             >
-              <Download className="size-4" aria-hidden />
+              <Download className="size-3.5" aria-hidden />
               Export CSV
             </Button>
           ) : null}
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-2 px-3 pb-3 pt-0">
           {displayDesc.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No events yet.</p>
+            <p className="text-[11px] text-muted-foreground">No events yet.</p>
           ) : (
-            <div className="rounded-md border border-border overflow-x-auto">
+            <div className="space-y-2">
+              {showLaytimeCountColumn ? <EventsTableLegend /> : null}
+              <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
               <table
                 className={cn(
-                  "w-full text-sm caption-bottom",
-                  showStatusColumn ? "min-w-[720px]" : "min-w-[560px]"
+                  "w-full min-w-[720px] border-collapse text-[11px]",
+                  showLaytimeCountColumn
+                    ? showStatusColumn
+                      ? "min-w-[800px]"
+                      : "min-w-[680px]"
+                    : showStatusColumn
+                      ? "min-w-[640px]"
+                      : "min-w-[520px]"
                 )}
               >
-                <thead>
-                  <tr className="border-b border-border bg-muted/50 text-left text-xs font-medium text-muted-foreground">
-                    <th className="px-3 py-2 whitespace-nowrap">Event starts at</th>
-                    <th className="px-3 py-2 whitespace-nowrap">Event ends at</th>
-                    <th className="px-3 py-2 whitespace-nowrap">Length</th>
-                    <th className="px-3 py-2 whitespace-nowrap">Type</th>
-                    {showStatusColumn ? (
-                      <th className="px-3 py-2 whitespace-nowrap">Category</th>
+                <thead className="sticky top-0 z-[1] bg-muted/98 backdrop-blur-sm">
+                  <tr className="border-b border-border">
+                    <EventTh>Start</EventTh>
+                    <EventTh>End</EventTh>
+                    <EventTh>Length</EventTh>
+                    <EventTh>Type</EventTh>
+                    {showStatusColumn ? <EventTh>Cat.</EventTh> : null}
+                    {showLaytimeCountColumn ? (
+                      <EventTh align="center" className="min-w-[8.25rem]">
+                        Laytime
+                      </EventTh>
                     ) : null}
-                    <th className="px-3 py-2 whitespace-nowrap">Created by</th>
-                    <th className="px-3 py-2 min-w-[12rem]">Remarks</th>
-                    <th className="px-3 py-2 text-right whitespace-nowrap">Actions</th>
+                    <EventTh>By</EventTh>
+                    <EventTh className="min-w-[8rem]">Remarks</EventTh>
+                    <EventTh align="right"> </EventTh>
                   </tr>
                 </thead>
                 <tbody>
-                  {displayDesc.map((row) => {
+                  {displayDesc.map((row, rowIdx) => {
+                    const rowBase =
+                      "border-b border-border/70 transition-colors hover:bg-muted/25";
+                    const cell = "px-2 py-1 align-middle whitespace-nowrap";
+                    const cellMono = cn(
+                      cell,
+                      "font-mono text-[10px] tabular-nums leading-tight"
+                    );
+
                     if (row.kind === "gap") {
                       return (
                         <tr
                           key={row.id}
-                          className="border-b border-border last:border-0 border-l-4 border-l-destructive bg-destructive/10 text-destructive-foreground"
+                          className={cn(
+                            rowBase,
+                            "border-l-4 border-l-destructive bg-destructive/10 text-destructive"
+                          )}
                         >
-                          <td className="px-3 py-2 align-top whitespace-nowrap text-destructive">
+                          <td className={cn(cellMono, "text-destructive")}>
                             {formatDt(row.fromIso)}
                           </td>
-                          <td className="px-3 py-2 align-top whitespace-nowrap text-destructive">
+                          <td className={cn(cellMono, "text-destructive")}>
                             {formatDt(row.toIso)}
                           </td>
-                          <td className="px-3 py-2 align-top whitespace-nowrap text-destructive">
+                          <td className={cn(cellMono, "font-semibold text-destructive")}>
                             {row.durationLabel}
                           </td>
                           <td
-                            className="px-3 py-2 align-top whitespace-nowrap font-medium text-destructive"
+                            className={cn(cell, "text-[10px] font-medium text-destructive")}
                             colSpan={
                               (showStatusColumn ? 1 : 0) +
+                              (showLaytimeCountColumn ? 1 : 0) +
                               1 /* created by */ +
                               1 /* remarks */ +
                               1 /* type */
                             }
                           >
-                            Incomplete (gap) — fill or adjust adjacent events
+                            Incomplete (gap)
                           </td>
-                          <td className="px-3 py-2 align-top text-right whitespace-nowrap">
+                          <td className={cn(cell, "text-right")}>
                             {onFillGap ? (
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 disabled={fillGapPreparing}
-                                className="gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+                                className="h-6 gap-1 border-destructive/40 px-2 text-[10px] text-destructive hover:bg-destructive/10"
                                 onClick={() =>
                                   onFillGap({ startIso: row.fromIso, endIso: row.toIso })
                                 }
                               >
-                                <Plus className="size-3.5" aria-hidden />
-                                {fillGapPreparing ? "Preparing…" : "Fill gap"}
+                                <Plus className="size-3" aria-hidden />
+                                {fillGapPreparing ? "…" : "Fill"}
                               </Button>
                             ) : null}
                           </td>
@@ -389,60 +495,93 @@ export function SofEventsTable({
                       );
                     }
                     const { ev, fromIso, toIso, durationLabel } = row;
+                    const cat = rowCategoryFromEventType(ev);
                     return (
-                      <tr key={ev.id} className="border-b border-border last:border-0">
-                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-nowrap">
+                      <tr
+                        key={ev.id}
+                        className={cn(rowBase, rowIdx % 2 === 1 && "bg-muted/10")}
+                      >
+                        <td className={cn(cellMono, "text-muted-foreground")}>
                           {fromIso ? formatDt(fromIso) : "—"}
                         </td>
-                        <td className="px-3 py-2 align-top whitespace-nowrap">{formatDt(toIso)}</td>
-                        <td className="px-3 py-2 align-top whitespace-nowrap">{durationLabel}</td>
-                        <td className="px-3 py-2 align-top font-medium whitespace-nowrap">
+                        <td className={cn(cellMono, "text-foreground")}>{formatDt(toIso)}</td>
+                        <td className={cn(cellMono, "font-semibold text-foreground")}>
+                          {durationLabel}
+                        </td>
+                        <td
+                          className={cn(
+                            cell,
+                            "max-w-[8rem] truncate text-[10px] font-medium text-foreground"
+                          )}
+                        >
                           {rowTypeLabel(ev)}
                         </td>
                         {showStatusColumn ? (
-                          <td className="px-3 py-2 align-top whitespace-nowrap">
-                            {rowCategoryFromEventType(ev).isHold ? (
-                              <span className="text-amber-600">Hold</span>
-                            ) : (
-                              <span className="text-muted-foreground">Normal</span>
-                            )}
+                          <td className={cell}>
+                            <EventCategoryBadge isHold={cat.isHold} label={cat.label} />
                           </td>
                         ) : null}
-                        <td className="px-3 py-2 align-top text-muted-foreground whitespace-nowrap">
+                        {showLaytimeCountColumn ? (
+                          <td className={cn(cell, "text-center")}>
+                            <div className="flex justify-center">
+                              <SofLaytimeCountToggle
+                                variant="table"
+                                disabled={readOnly || countMut.isPending}
+                                value={ev.countsAsLaytime !== false}
+                                onChange={(countsAsLaytime) =>
+                                  countMut.mutate({ eventId: ev.id, countsAsLaytime })
+                                }
+                              />
+                            </div>
+                          </td>
+                        ) : null}
+                        <td
+                          className={cn(
+                            cell,
+                            "max-w-[5.5rem] truncate text-[10px] text-muted-foreground"
+                          )}
+                          title={ev.createdByUser.fullName}
+                        >
                           {ev.createdByUser.fullName}
                         </td>
-                        <td className="px-3 py-2 align-top text-[11px] leading-snug text-foreground whitespace-pre-wrap break-words max-w-[28rem]">
+                        <td
+                          className={cn(cell, "max-w-[10rem] truncate text-[10px] text-foreground")}
+                          title={ev.remarks?.trim() ?? undefined}
+                        >
                           {ev.remarks?.trim() ? ev.remarks : "—"}
                         </td>
-                        <td className="px-3 py-2 align-top text-right whitespace-nowrap">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            disabled={readOnly}
-                            onClick={() => openEdit(ev)}
-                            aria-label="Edit event"
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive"
-                            disabled={readOnly || delMut.isPending}
-                            onClick={() => {
-                              if (confirm("Delete this event?")) delMut.mutate(ev.id);
-                            }}
-                            aria-label="Delete event"
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
+                        <td className={cn(cell, "text-right")}>
+                          <div className="inline-flex items-center gap-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-muted-foreground hover:text-foreground"
+                              disabled={readOnly}
+                              onClick={() => openEdit(ev)}
+                              aria-label="Edit event"
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-destructive/80 hover:text-destructive"
+                              disabled={readOnly || delMut.isPending}
+                              onClick={() => {
+                                if (confirm("Delete this event?")) delMut.mutate(ev.id);
+                              }}
+                              aria-label="Delete event"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
           {footer ? <div className="pt-1">{footer}</div> : null}
@@ -500,6 +639,18 @@ export function SofEventsTable({
                   the previous row’s end.
                 </p>
               </div>
+              {showLaytimeCountColumn ? (
+                <div className="space-y-2 rounded-lg border border-border/80 bg-muted/10 p-3">
+                  <Label className="text-xs">Laytime (contact window)</Label>
+                  <SofLaytimeCountToggle
+                    value={editCountsAsLaytime}
+                    onChange={setEditCountsAsLaytime}
+                  />
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    Count + not count = contact on the daily sheet. Free time is not split.
+                  </p>
+                </div>
+              ) : null}
               {editingIsHold ? (
                 <div className="space-y-2">
                   <Label>Hold reason</Label>
@@ -568,7 +719,10 @@ export function SofEventsTable({
                         eventTime: new Date(endMs).toISOString(),
                         ...durationPayload,
                         holdReason: editingIsHold ? editHoldReason || null : null,
-                        remarks: editRemarks.trim() === "" ? null : editRemarks
+                        remarks: editRemarks.trim() === "" ? null : editRemarks,
+                        ...(showLaytimeCountColumn
+                          ? { countsAsLaytime: editCountsAsLaytime }
+                          : {})
                       }
                     });
                   }}

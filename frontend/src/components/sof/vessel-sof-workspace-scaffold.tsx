@@ -441,7 +441,11 @@ function VesselSofWorkspaceScaffoldInner({
           : "Discharge";
 
   const helpText = hasSofSelection
-    ? `Showing ${sectionTitle.toLowerCase()} for the selected SOF — use “Change SOF” above to pick a different one.`
+    ? `Showing ${sectionTitle.toLowerCase()} for the selected SOF — use “Change SOF” above to pick a different one.${
+        section === "laytime"
+          ? " After Recalculate, the results panel matches your plan’s laytime summary (allowed vs. used, demurrage / despatch, exclusions); the full worksheet is below."
+          : ""
+      }`
     : hasVesselSelection && showLighterDisambig
       ? "Several SOFs exist for this lighter. Pick one above."
       : hasVesselSelection
@@ -636,11 +640,15 @@ function VesselSofWorkspaceScaffoldInner({
 
   return (
     <div className="w-full space-y-6">
-      {topChrome}
+      {section === "laytime" ? (
+        <div className="laytime-print-suppress">{topChrome}</div>
+      ) : (
+        topChrome
+      )}
       {sofPickerCard}
 
       <div className="w-full min-w-0 space-y-4">
-        <div>
+        <div className={section === "laytime" ? "laytime-print-suppress" : undefined}>
           <h1 className="text-2xl font-bold tracking-tight">{sectionTitle}</h1>
           <p className="text-sm text-muted-foreground">{helpText}</p>
         </div>

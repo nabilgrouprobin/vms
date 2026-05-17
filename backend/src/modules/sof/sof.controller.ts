@@ -21,6 +21,7 @@ import { CreateLighterVesselSofDto } from "./dto/create-lighter-vessel-sof.dto";
 import { CreateMotherVesselDailyDischargeDto } from "./dto/create-mother-vessel-daily-discharge.dto";
 import { CreateMotherVesselSofDto } from "./dto/create-mother-vessel-sof.dto";
 import { CreateSofEventDto } from "./dto/create-sof-event.dto";
+import { RecalculateLaytimeDto } from "./dto/recalculate-laytime.dto";
 import { ListLighterVesselSofsQueryDto } from "./dto/list-lighter-vessel-sofs.query.dto";
 import { ListMotherVesselSofsQueryDto } from "./dto/list-mother-vessel-sofs.query.dto";
 import { UpdateLighterVesselSofDto } from "./dto/update-lighter-vessel-sof.dto";
@@ -166,13 +167,19 @@ export class SofController {
 
   @Post("mother-vessels/:id/laytime/recalculate")
   @Roles(...SOF_EDITOR_ROLES)
-  recalculateMotherLaytime(@Param("id") id: string) {
-    return this.sofService.recalculateMotherLaytime(id);
+  recalculateMotherLaytime(
+    @Param("id") id: string,
+    @Body() dto: RecalculateLaytimeDto = {}
+  ) {
+    return this.sofService.recalculateMotherLaytime(id, dto);
   }
 
   @Post("lighter-vessels/:id/laytime/recalculate")
   @Roles(...SOF_EDITOR_ROLES)
-  recalculateLighterLaytime(@Param("id") id: string) {
-    return this.sofService.recalculateLighterLaytime(id);
+  recalculateLighterLaytime(
+    @Param("id") id: string,
+    @Body() dto: RecalculateLaytimeDto = {}
+  ) {
+    return this.sofService.recalculateLighterLaytime(id, dto);
   }
 }

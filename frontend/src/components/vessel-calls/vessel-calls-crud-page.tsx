@@ -14,6 +14,7 @@ import { invalidateMotherLighterPickerCaches } from "@/components/workspace/moth
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -304,7 +305,7 @@ export function VesselCallsCrudPage() {
                               disabled={deleteM.isPending}
                               onClick={() => {
                                 const ok = window.confirm(
-                                  `Delete vessel call ${row.callNo}? This cannot be undone if the system allows removal.`
+                                  `Delete vessel call ${row.callNo}? If a draft SOF is linked, it and all its events will be removed too. Approved or closed SOFs must be handled in Vessel SOF first.`
                                 );
                                 if (!ok) return;
                                 setFormError(null);
@@ -401,12 +402,10 @@ export function VesselCallsCrudPage() {
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-eta">ETA</Label>
-                <Input
-                  id="edit-eta"
-                  type="datetime-local"
+                <Label htmlFor="edit-eta">ETA (local, 24-hour)</Label>
+                <SofLocalDatetimeInputs
                   value={etaLocal}
-                  onChange={(e) => setEtaLocal(e.target.value)}
+                  onChange={setEtaLocal}
                 />
                 {!etaParseOk ? (
                   <p className="text-xs text-destructive">Enter a valid date and time.</p>

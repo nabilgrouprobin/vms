@@ -29,7 +29,12 @@ import {
   validateSofStatusTransition
 } from "./validators/sof.validator";
 import { PrismaService } from "../../prisma/prisma.service";
+import { RecalculateLaytimeDto } from "./dto/recalculate-laytime.dto";
 import { LaytimeCalculationService } from "./laytime/laytime-calculation.service";
+import {
+  loadSofLaytimeWeekFields,
+  persistSofLaytimeWeekFields
+} from "./laytime/sof-laytime-week.persistence";
 import { SofRepository } from "./sof.repository";
 
 @Injectable()
@@ -92,7 +97,8 @@ export class SofService {
       throw new NotFoundException("Mother vessel SOF was not found");
     }
 
-    return sof;
+    const week = await loadSofLaytimeWeekFields(this.prisma, id);
+    return { ...sof, ...week };
   }
 
   async getSofOptions() {
@@ -145,10 +151,61 @@ export class SofService {
     const currentSof = await this.getMotherVesselSof(id);
     this.assertSofEditable(currentSof.status, dto.status);
 
-    return this.sofRepository.updateMotherVesselSof(
-      id,
-      this.removeUndefined(this.buildSofUpdateData(dto))
+    if (dto.laytimeHolidays !== undefined) {
+      for (const h of dto.laytimeHolidays) {
+        const s = parseRequiredDate(h.holidayStartAt, "holidayStartAt");
+        const e = parseRequiredDate(h.holidayEndAt, "holidayEndAt");
+        if (+e < +s) {
+          throw new BadRequestException(`Holiday "${h.name}" ends before it starts`);
+        }
+      }
+    }
+
+    const weekPeriod = dto.laytimeExcludedTimePeriod;
+    const weekDays = dto.laytimeExcludedDays;
+    const base = this.removeUndefined(
+      this.buildSofUpdateData({
+        ...dto,
+        laytimeExcludedTimePeriod: undefined,
+        laytimeExcludedDays: undefined
+      })
     );
+
+    const applyWeekFields = async () => {
+      if (weekPeriod !== undefined || weekDays !== undefined) {
+        await persistSofLaytimeWeekFields(this.prisma, id, {
+          laytimeExcludedTimePeriod: weekPeriod,
+          laytimeExcludedDays: weekDays
+        });
+      }
+    };
+
+    if (dto.laytimeHolidays === undefined) {
+      await this.sofRepository.updateMotherVesselSof(id, base);
+      await applyWeekFields();
+      return this.getMotherVesselSof(id);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.sofLaytimeHoliday.deleteMany({ where: { statementId: id } });
+      if (dto.laytimeHolidays!.length > 0) {
+        await tx.sofLaytimeHoliday.createMany({
+          data: dto.laytimeHolidays!.map((h, index) => ({
+            statementId: id,
+            name: h.name.trim(),
+            holidayStartAt: parseRequiredDate(h.holidayStartAt, "holidayStartAt"),
+            holidayEndAt: parseRequiredDate(h.holidayEndAt, "holidayEndAt"),
+            eveContactEndHm: h.eveContactEndHm?.trim() || null,
+            postContactStartHm: h.postContactStartHm?.trim() || null,
+            sortOrder: h.sortOrder ?? index
+          }))
+        });
+      }
+      await tx.statementOfFacts.update({ where: { id }, data: base });
+    });
+
+    await applyWeekFields();
+    return this.getMotherVesselSof(id);
   }
 
   async deleteMotherVesselSof(id: string) {
@@ -218,7 +275,8 @@ export class SofService {
       throw new NotFoundException("Lighter vessel SOF was not found");
     }
 
-    return sof;
+    const week = await loadSofLaytimeWeekFields(this.prisma, id);
+    return { ...sof, ...week };
   }
 
   async createLighterVesselSof(dto: CreateLighterVesselSofDto) {
@@ -258,10 +316,61 @@ export class SofService {
     const currentSof = await this.getLighterVesselSof(id);
     this.assertSofEditable(currentSof.status, dto.status);
 
-    return this.sofRepository.updateLighterVesselSof(
-      id,
-      this.removeUndefined(this.buildSofUpdateData(dto))
+    if (dto.laytimeHolidays !== undefined) {
+      for (const h of dto.laytimeHolidays) {
+        const s = parseRequiredDate(h.holidayStartAt, "holidayStartAt");
+        const e = parseRequiredDate(h.holidayEndAt, "holidayEndAt");
+        if (+e < +s) {
+          throw new BadRequestException(`Holiday "${h.name}" ends before it starts`);
+        }
+      }
+    }
+
+    const weekPeriod = dto.laytimeExcludedTimePeriod;
+    const weekDays = dto.laytimeExcludedDays;
+    const base = this.removeUndefined(
+      this.buildSofUpdateData({
+        ...dto,
+        laytimeExcludedTimePeriod: undefined,
+        laytimeExcludedDays: undefined
+      })
     );
+
+    const applyWeekFields = async () => {
+      if (weekPeriod !== undefined || weekDays !== undefined) {
+        await persistSofLaytimeWeekFields(this.prisma, id, {
+          laytimeExcludedTimePeriod: weekPeriod,
+          laytimeExcludedDays: weekDays
+        });
+      }
+    };
+
+    if (dto.laytimeHolidays === undefined) {
+      await this.sofRepository.updateLighterVesselSof(id, base);
+      await applyWeekFields();
+      return this.getLighterVesselSof(id);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.sofLaytimeHoliday.deleteMany({ where: { statementId: id } });
+      if (dto.laytimeHolidays!.length > 0) {
+        await tx.sofLaytimeHoliday.createMany({
+          data: dto.laytimeHolidays!.map((h, index) => ({
+            statementId: id,
+            name: h.name.trim(),
+            holidayStartAt: parseRequiredDate(h.holidayStartAt, "holidayStartAt"),
+            holidayEndAt: parseRequiredDate(h.holidayEndAt, "holidayEndAt"),
+            eveContactEndHm: h.eveContactEndHm?.trim() || null,
+            postContactStartHm: h.postContactStartHm?.trim() || null,
+            sortOrder: h.sortOrder ?? index
+          }))
+        });
+      }
+      await tx.statementOfFacts.update({ where: { id }, data: base });
+    });
+
+    await applyWeekFields();
+    return this.getLighterVesselSof(id);
   }
 
   async deleteLighterVesselSof(id: string) {
@@ -326,8 +435,8 @@ export class SofService {
     // Hold/Delay is now driven by the master event type's `category`.
     const derivedIsHold = eventTypeDef.category === "HOLD_DELAY";
     /** Laytime engine uses this flag; align with category when the client omits it (matches seed + docs). */
-    const derivedCountsAsLaytime =
-      dto.countsAsLaytime ?? eventTypeDef.category !== "HOLD_DELAY";
+    /** Default to count; user can toggle per event in the SOF table. */
+    const derivedCountsAsLaytime = dto.countsAsLaytime ?? true;
 
     const baseInsert = this.removeUndefined({
       statementId,
@@ -535,7 +644,7 @@ export class SofService {
     }
 
     let derivedIsHold: boolean | undefined;
-    let nextEventTypeCategory: "NORMAL" | "HOLD_DELAY" | undefined;
+    let nextEventTypeCategory: "NORMAL" | "HOLD_DELAY" | "PREPARATION" | undefined;
     if (dto.eventTypeId !== undefined) {
       const eventTypeDef = await this.sofRepository.findActiveSofEventTypeDefinition(dto.eventTypeId);
       if (!eventTypeDef) {
@@ -578,11 +687,7 @@ export class SofService {
     );
 
     const countsAsLaytimePatch =
-      dto.countsAsLaytime !== undefined
-        ? dto.countsAsLaytime
-        : dto.eventTypeId !== undefined && nextEventTypeCategory !== undefined
-          ? nextEventTypeCategory !== "HOLD_DELAY"
-          : undefined;
+      dto.countsAsLaytime !== undefined ? dto.countsAsLaytime : undefined;
 
     return this.sofRepository.updateSofEvent(
       eventId,
@@ -603,11 +708,11 @@ export class SofService {
         // category. Otherwise leave the column untouched.
         isHold: derivedIsHold,
         holdReason:
-          nextEventTypeCategory === "NORMAL"
-            ? null
-            : nextEventTypeCategory === "HOLD_DELAY"
-              ? dto.holdReason
-              : dto.holdReason,
+          nextEventTypeCategory === "HOLD_DELAY"
+            ? dto.holdReason
+            : nextEventTypeCategory !== undefined
+              ? null
+              : undefined,
         responsibleParty: dto.responsibleParty,
         laytimeAccount: dto.laytimeAccount,
         referenceNo: dto.referenceNo,
@@ -842,11 +947,29 @@ export class SofService {
     ) as T;
   }
 
-  recalculateMotherLaytime(statementId: string) {
+  async recalculateMotherLaytime(statementId: string, dto?: RecalculateLaytimeDto) {
+    if (
+      dto?.laytimeExcludedTimePeriod !== undefined ||
+      dto?.laytimeExcludedDays !== undefined
+    ) {
+      await persistSofLaytimeWeekFields(this.prisma, statementId, {
+        laytimeExcludedTimePeriod: dto.laytimeExcludedTimePeriod,
+        laytimeExcludedDays: dto.laytimeExcludedDays
+      });
+    }
     return this.laytimeCalculation.recalculateMotherStatement(statementId);
   }
 
-  recalculateLighterLaytime(statementId: string) {
+  async recalculateLighterLaytime(statementId: string, dto?: RecalculateLaytimeDto) {
+    if (
+      dto?.laytimeExcludedTimePeriod !== undefined ||
+      dto?.laytimeExcludedDays !== undefined
+    ) {
+      await persistSofLaytimeWeekFields(this.prisma, statementId, {
+        laytimeExcludedTimePeriod: dto.laytimeExcludedTimePeriod,
+        laytimeExcludedDays: dto.laytimeExcludedDays
+      });
+    }
     return this.laytimeCalculation.recalculateLighterStatement(statementId);
   }
 
@@ -903,6 +1026,7 @@ export class SofService {
       laytimeUsedHours: this.toDecimal(dto.laytimeUsedHours),
       laytimeExcludedHours: this.toDecimal(dto.laytimeExcludedHours),
       laytimeBalanceHours: this.toDecimal(dto.laytimeBalanceHours),
+      laytimePartialCargoMt: this.toDecimal(dto.laytimePartialCargoMt),
       demurrageAmount: this.toDecimal(dto.demurrageAmount),
       dispatchAmount: this.toDecimal(dto.dispatchAmount),
       netAmount: this.toDecimal(dto.netAmount),
@@ -927,6 +1051,8 @@ export class SofService {
       laytimeUsedHours: this.toNullableDecimal(dto.laytimeUsedHours),
       laytimeExcludedHours: this.toNullableDecimal(dto.laytimeExcludedHours),
       laytimeBalanceHours: this.toNullableDecimal(dto.laytimeBalanceHours),
+      laytimePartialCargoMt: this.toNullableDecimal(dto.laytimePartialCargoMt),
+      laytimeDischargeRateMtPerDay: this.toNullableDecimal(dto.laytimeDischargeRateMtPerDay),
       laytimeCommenceAt: parseOptionalDate(dto.laytimeCommenceAt, "laytimeCommenceAt"),
       demurrageAmount: this.toNullableDecimal(dto.demurrageAmount),
       dispatchAmount: this.toNullableDecimal(dto.dispatchAmount),

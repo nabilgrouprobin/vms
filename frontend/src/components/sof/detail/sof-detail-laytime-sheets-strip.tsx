@@ -50,7 +50,7 @@ export function SofDetailLaytimeSheetsStrip({
         <Button
           type="button"
           size="sm"
-          className="shrink-0 gap-1.5"
+          className="laytime-print-suppress shrink-0 gap-1.5"
           disabled={recalculateDisabled}
           onClick={onRecalculate}
         >

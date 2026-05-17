@@ -5,13 +5,16 @@ import { ChevronDown } from "lucide-react";
 
 import { formatDt, formatNum } from "@/lib/format";
 import {
+  coerceFiniteNumber,
   formatDecimalHoursToDaysHMin,
   formatDecimalHoursToHMin,
-  formatDecimalHoursToTotalHoursMin
+  formatDecimalHoursToTotalHoursMin,
+  formatLaytimeDecimalHours
 } from "@/lib/laytime-hours-format";
 import type {
   LaytimeBreakdown,
   LaytimeChronologyRow,
+  LaytimePortStatementContext,
   MotherLaytimeDailyLedger,
   MotherLaytimeTimesheet
 } from "@/lib/sof-api";
@@ -40,9 +43,8 @@ function fmtRate(v: number | null): string {
   return `${v.toLocaleString("en-US", { maximumFractionDigits: 2 })} MT/day`;
 }
 
-function fmt2(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmt2(n: unknown): string {
+  return formatLaytimeDecimalHours(n);
 }
 
 function Th({
@@ -76,6 +78,115 @@ function fmtLaysoftDhm(hours: number): string {
   return `${d}d-${String(h).padStart(2, "0")}h-${String(m).padStart(2, "0")}m`;
 }
 
+/** Laytime2000-style decimal days for demurrage / dispatch (5 decimal places). */
+function fmtLaytimeDecimalDays(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return "0.00000";
+  return (hours / 24).toFixed(5);
+}
+
+const DEM_EPS = 1e-4;
+
+function chronologyRowOnDemurrage(
+  r: LaytimeChronologyRow,
+  allowedHours: number | null,
+  index: number,
+  rows: LaytimeChronologyRow[]
+): boolean {
+  if (r.onDemurrageHours > DEM_EPS) return true;
+  if (r.remark.includes("Laytime Expires")) return true;
+  if (allowedHours != null && r.totalUsedHours > allowedHours + DEM_EPS) return true;
+  if (index > 0 && rows[index - 1]!.onDemurrageHours > DEM_EPS) return true;
+  return false;
+}
+
+/** Subtle row accent — no full-row red wash (keeps numbers readable). */
+const demurrageRowClass =
+  "border-l-4 border-l-amber-500 bg-amber-50/35 dark:border-l-amber-400 dark:bg-amber-950/20";
+
+const laytimeExpiresRowClass =
+  "border-l-4 border-l-amber-400 bg-amber-50/50 dark:border-l-amber-300 dark:bg-amber-950/25";
+
+function LaytimeRowStatusBadge({
+  onDemurrage,
+  laytimeExpires
+}: {
+  onDemurrage: boolean;
+  laytimeExpires: boolean;
+}) {
+  if (laytimeExpires) {
+    return (
+      <span className="inline-flex shrink-0 items-center rounded-full border border-amber-500/70 bg-white px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-400/60 dark:bg-zinc-900 dark:text-amber-100">
+        Expires
+      </span>
+    );
+  }
+  if (onDemurrage) {
+    return (
+      <span className="inline-flex shrink-0 items-center rounded-full border border-amber-600/60 bg-amber-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-950 dark:border-amber-500/50 dark:bg-amber-900/70 dark:text-amber-50">
+        Dem
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-background px-1.5 py-px text-[9px] font-medium text-muted-foreground">
+      LT
+    </span>
+  );
+}
+
+function LaytimeHourCell({
+  value,
+  variant = "default"
+}: {
+  value: unknown;
+  variant?: "default" | "contact" | "demurrage" | "muted";
+}) {
+  const n = coerceFiniteNumber(value);
+  const display = formatLaytimeDecimalHours(value);
+  const isZero = n === null || n <= 0.005;
+
+  if (isZero && variant !== "demurrage") {
+    return <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">—</span>;
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-[2.75rem] justify-end rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums leading-none",
+        variant === "default" && "text-foreground",
+        variant === "muted" && "font-medium text-muted-foreground",
+        variant === "contact" &&
+          "border border-emerald-300/90 bg-emerald-50 text-emerald-950 shadow-sm dark:border-emerald-600/50 dark:bg-emerald-950/50 dark:text-emerald-50",
+        variant === "demurrage" &&
+          "border border-amber-500/80 bg-white text-amber-950 shadow-sm dark:border-amber-400/70 dark:bg-zinc-900 dark:text-amber-50"
+      )}
+    >
+      {display}
+    </span>
+  );
+}
+
+function DailySheetLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/15 px-2 py-1 text-[10px] text-muted-foreground">
+      <span className="font-semibold text-foreground">Daily sheet</span>
+      <span>
+        Duration = day in laytime. Contact = contract window. Free = Duration − Contact (not
+        split on SOF). Count + Not count = Contact (from Events). Despatch = allowed − total
+        used (cumulative Count). Despatch = allowed − total used.
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <LaytimeHourCell value={16} variant="contact" />
+        contact
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <LaytimeHourCell value={24} variant="demurrage" />
+        demurrage
+      </span>
+    </div>
+  );
+}
+
 export type MotherLaytimeTimesheetLayout = "default" | "priority";
 
 export function MotherLaytimeTimesheetTable({
@@ -83,6 +194,7 @@ export function MotherLaytimeTimesheetTable({
   timesheet,
   breakdown,
   chronology = [],
+  portStatement = null,
   className,
   sheetLayout = "priority"
 }: {
@@ -91,6 +203,8 @@ export function MotherLaytimeTimesheetTable({
   breakdown: LaytimeBreakdown;
   /** Day-split chronology (Laytime2000-style); empty until recalculate returns rows. */
   chronology?: LaytimeChronologyRow[];
+  /** Vessel / port / NOR lines above the chronology (Laytime2000 port statement). */
+  portStatement?: LaytimePortStatementContext | null;
   className?: string;
   /** priority: daily + event tables first; supporting text in a collapsible. */
   sheetLayout?: MotherLaytimeTimesheetLayout;
@@ -102,127 +216,239 @@ export function MotherLaytimeTimesheetTable({
   const resolvedZoneGmt = formatGmtOffsetForZone(c.laytimeResolvedTimeZone);
 
   const dailyTable = (
-    <div className="w-full overflow-x-auto rounded-md border border-border">
-      <table className="w-full min-w-[1400px] border-collapse text-xs xl:min-w-[1600px] 2xl:min-w-[1800px]">
-        <thead>
-          <tr className="border-b border-border bg-muted/60">
-            <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
-              Date
-            </th>
-            <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
-              Day
-            </th>
-            <Th title="Hours of each day inside the contract working week — drives laytime ‘used’ vs free time.">
-              Contract hrs
-            </Th>
-            <Th title="Hours from SOF segments that count as discharge / cargo (laytime) activity.">
-              Working hrs
-            </Th>
-            <Th title="24 hours minus working hours on that calendar day (non-discharge / idle).">
-              Idle hrs
-            </Th>
-            <Th title="After free laytime is used, demurrage time accrues per charter rules.">
-              Demurrage hrs
-            </Th>
-            <Th title="24h MT from mother vessel daily discharge (Discharge on this SOF)">
-              Discharge qty
-            </Th>
-            <th className="min-w-[36rem] px-3 py-2 text-left text-[11px] font-semibold text-muted-foreground xl:min-w-[42rem] 2xl:min-w-[48rem]">
-              Activity details
-            </th>
-          </tr>
-        </thead>
-        <tbody className="[&_td]:border-border [&_tr]:border-b [&_tr]:border-border [&_tr:hover]:bg-muted/20">
-          {dailyLedger.rows.length === 0 ? (
-            <tr>
-              <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
+    <div className="space-y-3">
+      <DailySheetLegend />
+      <div className="w-full overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+        <table className="w-full min-w-[780px] border-collapse text-[11px]">
+          <thead className="sticky top-0 z-[1] bg-muted/98 backdrop-blur-sm">
+            <tr className="border-b border-border">
+              <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">Date</th>
+              <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">Day</th>
+              <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">St</th>
+              <Th className="border-l border-border/80" title="Calendar hours in laytime this day (24h mid-range; partial first/last day).">
+                Duration
+              </Th>
+              <Th title="Contract contact hours this day (NOR rules on tender day; 24h after demurrage).">
+                Contact
+              </Th>
+              <Th title="Duration minus contact.">Free</Th>
+              <Th title="SOF hours in contact window tagged Count.">Count</Th>
+              <Th title="SOF hours in contact tagged Not count (Count + Not count = contact).">
+                Not count
+              </Th>
+              <Th title="Cumulative sum of Count hours (against allowance).">Total used</Th>
+              <Th title="Allowed laytime − cumulative total used (Count).">
+                Despatch
+              </Th>
+              <Th
+                className="border-l border-border/80 bg-amber-50/80 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
+                title="Total used minus allowed hours (when over allowance)."
+              >
+                Demurrage
+              </Th>
+              <Th className="border-l border-border/80" title="Discharge MT (24h).">
+                MT
+              </Th>
+            </tr>
+          </thead>
+          <tbody>
+            {dailyLedger.rows.length === 0 ? (
+              <tr>
+                <td colSpan={11} className="px-3 py-6 text-center text-[11px] text-muted-foreground">
                 No calendar days in range. Set commence / NOR and add events or discharge rows.
               </td>
             </tr>
           ) : (
-            dailyLedger.rows.map((r) => (
-              <tr key={r.date}>
-                <td className="whitespace-nowrap px-2.5 py-1.5 font-mono tabular-nums">{r.date}</td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 capitalize">{r.weekday}</td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-mono tabular-nums">
-                  {fmt2(r.contactHour)}
-                </td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-mono tabular-nums">
-                  {fmt2(r.workingHour)}
-                </td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-mono tabular-nums">
-                  {fmt2(r.idleHour)}
-                </td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-mono tabular-nums">
-                  {fmt2(r.demurrageHour)}
-                </td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-mono tabular-nums">
-                  {r.dischargeQtyMt !== null ? `${fmt2(r.dischargeQtyMt)} MT` : "—"}
-                </td>
-                <td className="min-w-[36rem] px-3 py-1.5 align-top text-[11px] leading-snug xl:min-w-[42rem] 2xl:min-w-[48rem]">
-                  {r.activityDetails}
-                </td>
-              </tr>
-            ))
+            dailyLedger.rows.map((r, rowIdx) => {
+              const contactH = coerceFiniteNumber(r.contactHour) ?? 0;
+              const demH = coerceFiniteNumber(r.demurrageHour) ?? 0;
+              const onDem = Boolean(r.onDemurrage);
+              const expires = Boolean(r.laytimeExpiresThisDay);
+              return (
+                <tr
+                  key={r.date}
+                  className={cn(
+                    "border-b border-border/70 transition-colors hover:bg-muted/25",
+                    rowIdx % 2 === 1 && !onDem && !expires && "bg-muted/10",
+                    expires && laytimeExpiresRowClass,
+                    onDem && !expires && demurrageRowClass
+                  )}
+                  title={
+                    expires
+                      ? "Allowed laytime ends today — demurrage from here; weekends and holidays still count."
+                      : onDem
+                        ? "On demurrage — full calendar time (24h per day)."
+                        : undefined
+                  }
+                >
+                  <td className="whitespace-nowrap px-2 py-1 font-mono text-[10px] tabular-nums text-foreground">
+                    {r.date}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1 text-[10px] capitalize text-foreground">
+                    {r.weekday.slice(0, 3)}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1">
+                    <LaytimeRowStatusBadge onDemurrage={onDem} laytimeExpires={expires} />
+                  </td>
+                  <td className="border-l border-border/50 px-2 py-1 text-right">
+                    <LaytimeHourCell value={r.durationHour ?? 0} variant="default" />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <LaytimeHourCell
+                      value={r.contactHour}
+                      variant={onDem ? "default" : contactH > 0.005 ? "contact" : "muted"}
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <LaytimeHourCell value={r.freeTimeHour} variant="muted" />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <LaytimeHourCell
+                      value={r.toCountHour ?? r.workingHour}
+                      variant="default"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <LaytimeHourCell
+                      value={r.notToCountHour ?? r.idleHour}
+                      variant="muted"
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <LaytimeHourCell
+                      value={r.cumulativeTotalUsedHour ?? r.cumulativeCreditedHour ?? 0}
+                      variant={
+                        onDem
+                          ? "demurrage"
+                          : freeH != null &&
+                              (coerceFiniteNumber(r.cumulativeTotalUsedHour) ?? 0) >=
+                                freeH - 0.005
+                            ? "demurrage"
+                            : "default"
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <LaytimeHourCell
+                      value={r.despatchHour ?? 0}
+                      variant={
+                        (coerceFiniteNumber(r.despatchHour) ?? 0) > 0.005 ? "contact" : "muted"
+                      }
+                    />
+                  </td>
+                  <td className="border-l border-border/50 bg-amber-50/30 px-2 py-1 text-right dark:bg-amber-950/15">
+                    {expires && demH <= 0.005 ? (
+                      <span className="text-[10px] font-semibold text-amber-900 dark:text-amber-100">
+                        Expires
+                      </span>
+                    ) : (
+                      <LaytimeHourCell
+                        value={r.demurrageHour}
+                        variant={demH > 0.005 ? "demurrage" : "muted"}
+                      />
+                    )}
+                  </td>
+                  <td className="border-l border-border/50 px-2 py-1 text-right font-mono text-[10px] tabular-nums text-foreground">
+                    {r.dischargeQtyMt !== null ? fmt2(r.dischargeQtyMt) : "—"}
+                  </td>
+                </tr>
+              );
+            })
           )}
-        </tbody>
-        <tfoot>
-          <tr className="border-t-2 border-border bg-muted/50 font-semibold">
-            <td colSpan={2} className="px-2 py-2 text-[11px] text-muted-foreground">
-              Totals
-            </td>
-            <td className="px-2 py-2 text-right font-mono tabular-nums text-xs">
-              {fmt2(dailyLedger.totalContactHour)}
-            </td>
-            <td className="px-2 py-2 text-right font-mono tabular-nums text-xs">
-              {fmt2(dailyLedger.totalWorkingHour)}
-            </td>
-            <td className="px-2 py-2 text-right font-mono tabular-nums text-xs">
-              {fmt2(dailyLedger.totalIdleHour)}
-            </td>
-            <td className="px-2 py-2 text-right font-mono tabular-nums text-xs">
-              {fmt2(dailyLedger.totalDemurrageHour)}
-            </td>
-            <td className="px-2 py-2 text-right font-mono tabular-nums text-xs">
-              {dailyLedger.totalDischargeQtyMt > 0
-                ? `${fmt2(dailyLedger.totalDischargeQtyMt)} MT`
-                : "—"}
-            </td>
-            <td />
-          </tr>
-          <tr className="bg-muted/25 text-[11px]">
-            <td colSpan={8} className="px-2 py-1.5 text-muted-foreground">
-              <span className="font-medium text-foreground">Laytime used (events + calendar):</span>{" "}
-              {formatDecimalHoursToHMin(breakdown.usedHours)}
-              {breakdown.allowedHours != null
-                ? ` · free ${formatDecimalHoursToDaysHMin(breakdown.allowedHours)} (${formatDecimalHoursToTotalHoursMin(breakdown.allowedHours)})`
-                : ""}
-              {" · "}
-              balance {formatDecimalHoursToHMin(breakdown.balanceHours)} · dispatch time{" "}
-              {formatDecimalHoursToHMin(breakdown.dispatchHours)}
-            </td>
-          </tr>
-          <tr className="bg-muted/25 text-[11px]">
-            <td colSpan={4} className="px-2 py-1.5 text-muted-foreground">
-              Demurrage / dispatch / net
-            </td>
-            <td className="px-2 py-1.5 text-right font-medium tabular-nums" colSpan={4}>
-              {formatMoney(breakdown.demurrageAmount, breakdown.currency)} /{" "}
-              {formatMoney(breakdown.dispatchAmount, breakdown.currency)} /{" "}
-              {formatMoney(breakdown.netAmount, breakdown.currency)}
-            </td>
-          </tr>
-        </tfoot>
-      </table>
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-border bg-muted/40">
+              <td colSpan={3} className="px-2 py-1 text-[10px] font-semibold text-muted-foreground">
+                Totals
+              </td>
+              <td className="border-l border-border/50 px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(dailyLedger.totalDurationHour ?? 0)}
+              </td>
+              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(dailyLedger.totalContactHour)}
+              </td>
+              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(dailyLedger.totalFreeTimeHour ?? 0)}
+              </td>
+              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(dailyLedger.totalToCountHour ?? dailyLedger.totalWorkingHour)}
+              </td>
+              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(dailyLedger.totalNotToCountHour ?? dailyLedger.totalIdleHour)}
+              </td>
+              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(
+                  dailyLedger.totalToCountHour ??
+                    dailyLedger.totalCreditedLaytimeHour ??
+                    dailyLedger.totalWorkingHour ??
+                    0
+                )}
+              </td>
+              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {fmt2(dailyLedger.totalDespatchHour ?? 0)}
+              </td>
+              <td className="border-l border-border/50 bg-amber-50/40 px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums text-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+                {fmt2(dailyLedger.totalDemurrageHour)}
+              </td>
+              <td className="border-l border-border/50 px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
+                {dailyLedger.totalDischargeQtyMt > 0
+                  ? fmt2(dailyLedger.totalDischargeQtyMt)
+                  : "—"}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs">
+          <p className="font-medium text-muted-foreground">Laytime used</p>
+          <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+            {formatDecimalHoursToHMin(breakdown.usedHours)}
+          </p>
+          {breakdown.allowedHours != null ? (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Allowed {formatDecimalHoursToDaysHMin(breakdown.allowedHours)} (
+              {formatDecimalHoursToTotalHoursMin(breakdown.allowedHours)})
+            </p>
+          ) : null}
+        </div>
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs">
+          <p className="font-medium text-muted-foreground">Balance</p>
+          <p
+            className={cn(
+              "mt-1 font-mono text-sm font-semibold tabular-nums",
+              (coerceFiniteNumber(breakdown.balanceHours) ?? 0) < -0.01
+                ? "text-amber-800 dark:text-amber-200"
+                : "text-foreground"
+            )}
+          >
+            {formatDecimalHoursToHMin(breakdown.balanceHours)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Dispatch {formatDecimalHoursToHMin(breakdown.dispatchHours)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-amber-200/80 bg-amber-50/50 px-3 py-2.5 text-xs dark:border-amber-800/50 dark:bg-amber-950/30 sm:col-span-2 lg:col-span-1">
+          <p className="font-medium text-amber-900/80 dark:text-amber-200/90">Money</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+            Dem. {formatMoney(breakdown.demurrageAmount, breakdown.currency)}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Disp. {formatMoney(breakdown.dispatchAmount, breakdown.currency)} · Net{" "}
+            {formatMoney(breakdown.netAmount, breakdown.currency)}
+          </p>
+        </div>
+      </div>
     </div>
   );
 
   const chronologyTable =
     chronology.length === 0 ? null : (
-      <div className="w-full overflow-x-auto rounded-md border border-border text-xs">
+      <div className="w-full overflow-x-auto rounded-xl border border-border bg-card text-sm shadow-sm">
         <table className="w-full min-w-[900px] border-collapse xl:min-w-[1000px]">
-          <thead>
-            <tr className="border-b bg-muted/50">
+          <thead className="bg-muted/90">
+            <tr className="border-b border-border">
               <th className="px-2 py-2 text-left text-[11px] font-semibold text-muted-foreground">
                 Day
               </th>
@@ -242,7 +468,7 @@ export function MotherLaytimeTimesheetTable({
                 Remark
               </th>
               <th className="px-2 py-2 text-right text-[11px] font-semibold text-muted-foreground">
-                To count
+                Count
               </th>
               <th className="px-2 py-2 text-right text-[11px] font-semibold text-muted-foreground">
                 Total time
@@ -253,36 +479,58 @@ export function MotherLaytimeTimesheetTable({
             </tr>
           </thead>
           <tbody>
-            {chronology.map((r, i) => (
-              <tr key={`${r.date}-${r.startLocalHm}-${r.endLocalHm}-${i}`} className="border-b">
-                <td className="whitespace-nowrap px-2 py-1 capitalize">{r.weekday}</td>
-                <td className="whitespace-nowrap px-2 py-1 font-mono">{r.date}</td>
-                <td className="whitespace-nowrap px-2 py-1 font-mono">{r.startLocalHm}</td>
-                <td className="whitespace-nowrap px-2 py-1 font-mono">{r.endLocalHm}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-right font-mono tabular-nums">
+            {chronology.map((r, i) => {
+              const onDem = chronologyRowOnDemurrage(r, freeH, i, chronology);
+              return (
+              <tr
+                key={`${r.date}-${r.startLocalHm}-${r.endLocalHm}-${i}`}
+                className={cn(
+                  "border-b border-border/70",
+                  onDem && demurrageRowClass,
+                  i % 2 === 1 && !onDem && "bg-muted/10"
+                )}
+              >
+                <td className="whitespace-nowrap px-3 py-2 capitalize text-foreground">{r.weekday}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{r.date}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{r.startLocalHm}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{r.endLocalHm}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right font-mono tabular-nums">
                   {r.fraction}
                 </td>
-                <td className="max-w-[14rem] truncate px-2 py-1 text-[11px]" title={r.remark}>
+                <td
+                  className={cn(
+                    "max-w-[14rem] truncate px-2 py-1 text-[10px]",
+                    r.remark.includes("Laytime Expires") &&
+                      "font-semibold text-amber-900 dark:text-amber-100"
+                  )}
+                  title={r.remark}
+                >
                   {r.remark}
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px]">
                   {fmtLaysoftDhm(r.toCountHours)}
                 </td>
-                <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px]">
+                <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px] tabular-nums text-foreground">
                   {fmtLaysoftDhm(r.totalUsedHours)}
                 </td>
-                <td className="whitespace-nowrap px-2 py-1 text-right font-mono text-[11px]">
+                <td
+                  className={cn(
+                    "whitespace-nowrap px-2 py-1 text-right font-mono text-[11px] tabular-nums",
+                    onDem && r.onDemurrageHours > DEM_EPS && "font-semibold text-red-700 dark:text-red-300"
+                  )}
+                >
                   {fmtLaysoftDhm(r.onDemurrageHours)}
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>
     );
 
   const eventsTable = (
-    <div className="w-full overflow-x-auto rounded-md border border-border text-xs">
+    <div className="w-full overflow-x-auto text-xs">
       <table className="w-full min-w-[960px] border-collapse xl:min-w-[1100px]">
         <thead>
           <tr className="border-b bg-muted/50">
@@ -315,13 +563,204 @@ export function MotherLaytimeTimesheetTable({
               <td className="px-2 py-1.5 text-right font-mono text-[11px]">
                 {formatDecimalHoursToHMin(row.countingUsedHours)}
               </td>
-              <td className="px-2 py-1.5 text-[11px]">{row.remark}</td>
+              <td
+                className="max-w-[20rem] truncate px-2 py-1 text-[10px] text-foreground"
+                title={row.remark}
+              >
+                {row.remark}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+
+  const laytimeStatementSummary = (
+    <div className="rounded-md border border-border/80 bg-muted/20 p-3 text-xs">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Laytime statement summary
+      </p>
+      <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+        Same figures as a Laytime2000 summary page: durations as{" "}
+        <span className="font-mono text-foreground">Xd-XXh-XXm</span>, then decimal days × rate.
+      </p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[480px] border-collapse">
+          <tbody className="[&_td]:border-border [&_tr]:border-b [&_tr]:border-border">
+            <tr>
+              <td className="px-2 py-1.5 font-medium text-muted-foreground">Laytime allowed</td>
+              <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                {freeH != null ? fmtLaysoftDhm(freeH) : "—"}
+              </td>
+            </tr>
+            <tr>
+              <td className="px-2 py-1.5 font-medium text-muted-foreground">Laytime used</td>
+              <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                {fmtLaysoftDhm(breakdown.usedHours)}
+              </td>
+            </tr>
+            <tr>
+              <td className="px-2 py-1.5 font-medium text-muted-foreground">
+                Time lost (demurrage time)
+              </td>
+              <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                {freeH != null ? fmtLaysoftDhm(breakdown.demurrageHours) : "—"}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div>
+          <dt className="text-[10px] text-muted-foreground">Demurrage (per day)</dt>
+          <dd className="font-mono text-sm font-medium tabular-nums">
+            {c.laytimeDemurrageRatePerDay != null
+              ? formatMoney(c.laytimeDemurrageRatePerDay, c.currency)
+              : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10px] text-muted-foreground">Despatch (per day)</dt>
+          <dd className="font-mono text-sm font-medium tabular-nums">
+            {c.laytimeDispatchRatePerDay != null
+              ? formatMoney(c.laytimeDispatchRatePerDay, c.currency)
+              : "—"}
+          </dd>
+        </div>
+      </dl>
+      <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-[11px] leading-relaxed">
+        {breakdown.demurrageHours > 1e-6 &&
+        breakdown.demurrageAmount != null &&
+        c.laytimeDemurrageRatePerDay != null ? (
+          <p>
+            <span className="text-muted-foreground">Discharge / ops result:</span>{" "}
+            <span className="font-mono font-medium tabular-nums text-foreground">
+              {fmtLaytimeDecimalDays(breakdown.demurrageHours)} days @{" "}
+              {formatMoney(c.laytimeDemurrageRatePerDay, c.currency)} / day ={" "}
+              {formatMoney(breakdown.demurrageAmount, c.currency)} demurrage
+            </span>
+          </p>
+        ) : (
+          <p className="text-muted-foreground">
+            No demurrage accrual, or demurrage rate / allowance not set.
+          </p>
+        )}
+        {breakdown.dispatchHours > 1e-6 &&
+        breakdown.dispatchAmount != null &&
+        c.laytimeDispatchRatePerDay != null ? (
+          <p>
+            <span className="text-muted-foreground">Dispatch credit:</span>{" "}
+            <span className="font-mono font-medium tabular-nums text-foreground">
+              {fmtLaytimeDecimalDays(breakdown.dispatchHours)} days @{" "}
+              {formatMoney(c.laytimeDispatchRatePerDay, c.currency)} / day ={" "}
+              {formatMoney(breakdown.dispatchAmount, c.currency)}
+            </span>
+          </p>
+        ) : null}
+        <p className="text-right text-sm font-semibold text-foreground">
+          Net due{" "}
+          {formatMoney(breakdown.netAmount, breakdown.currency ?? c.currency)}
+        </p>
+      </div>
+    </div>
+  );
+
+  const portStatementAndParams =
+    portStatement != null ? (
+      <div className="mb-3 rounded-md border border-border/60 bg-muted/15 p-3 text-[11px] leading-relaxed">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Port statement
+        </p>
+        <dl className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+          <div>
+            <dt className="text-muted-foreground">Vessel</dt>
+            <dd className="font-medium text-foreground">{portStatement.vesselName ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Voyage / call</dt>
+            <dd className="font-medium text-foreground">{portStatement.voyageLine ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Port</dt>
+            <dd className="font-medium text-foreground">{portStatement.portName ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Operation</dt>
+            <dd className="font-medium text-foreground">{portStatement.operationLabel}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">Arrived</dt>
+            <dd className="text-foreground">{portStatement.arrivedLine ?? "—"}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">NOR tendered</dt>
+            <dd className="text-foreground">{portStatement.norTenderedLine ?? "—"}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">In berth / discharge activity</dt>
+            <dd className="text-foreground">{portStatement.inBerthOrWorkingLine ?? "—"}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">Time to count from</dt>
+            <dd className="font-mono text-foreground">{formatDt(breakdown.commenceAt)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Laytime allowed</dt>
+            <dd className="font-mono font-medium tabular-nums text-foreground">
+              {freeH != null ? fmtLaysoftDhm(freeH) : "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Laytime used</dt>
+            <dd className="font-mono font-medium tabular-nums text-foreground">
+              {fmtLaysoftDhm(breakdown.usedHours)}
+            </dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Laytime calculation parameters
+        </p>
+        <dl className="mt-2 grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
+          <div>
+            <dt className="text-muted-foreground">Quantity</dt>
+            <dd className="font-medium tabular-nums">{fmtQtyMt(c.cargoQtyMt)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Rate</dt>
+            <dd className="font-medium tabular-nums">{fmtRate(c.dischargeRateMtPerDay)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Workable / total hatches</dt>
+            <dd className="font-mono font-medium">
+              {c.workableHatches != null || c.totalHatches != null
+                ? `${c.workableHatches ?? "—"} / ${c.totalHatches ?? "—"}`
+                : "—"}
+            </dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">Allowed time source</dt>
+            <dd className="text-[11px] font-medium leading-snug">{c.allowedSource}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">Contract contact window</dt>
+            <dd className="text-[11px] font-medium leading-snug">
+              {weekLabel ? (
+                <span>
+                  Week starts / ends: {weekLabel}. Contact hours each day are inside this window;
+                  outside = free time. After allowed laytime is used, weekends and holidays no
+                  longer deduct (on demurrage).
+                </span>
+              ) : c.excludedDays?.length ? (
+                <span>Excluded weekdays: {c.excludedDays.join(", ")}</span>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+        </dl>
+      </div>
+    ) : null;
 
   const auxiliaryBlock = (
     <>
@@ -382,12 +821,16 @@ export function MotherLaytimeTimesheetTable({
             with the contract working week.
           </li>
           <li>
-            <span className="font-medium text-foreground">Working hrs</span> — SOF segments that
-            count as discharge / laytime activity.
+            <span className="font-medium text-foreground">Count</span> — SOF time in the contact
+            window tagged Count (Events table).
           </li>
           <li>
-            <span className="font-medium text-foreground">Idle hrs</span> — 24 h minus working hrs
-            on that calendar day.
+            <span className="font-medium text-foreground">Not count</span> — SOF time in contact
+            tagged Not count; Count + Not count = contact. Free time is not split.
+          </li>
+          <li>
+            <span className="font-medium text-foreground">Despatch</span> — allowed − total used +
+            cumulative not-to-count.
           </li>
           <li>
             Discharge MT from <span className="font-medium text-foreground">Discharge</span> on this
@@ -448,42 +891,71 @@ export function MotherLaytimeTimesheetTable({
     </>
   );
 
+  const unifiedWorksheet = (
+    <section
+      id="laytime-worksheet"
+      aria-label="Laytime worksheet"
+      className="scroll-mt-20 overflow-hidden rounded-md border border-border bg-card shadow-sm"
+    >
+      <div className="border-b border-border bg-muted/35 px-3 py-2.5 sm:px-4">
+        <h3 className="text-sm font-semibold tracking-tight text-foreground">Laytime worksheet</h3>
+        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+          Statement summary (Laytime2000-style), daily ledger, port statement and chronology, then
+          SOF segments. Use <span className="font-medium text-foreground">Recalculate</span> to
+          refresh all parts.
+        </p>
+      </div>
+      <div className="divide-y divide-border">
+        <div className="space-y-1.5 p-2 sm:p-3">
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Part 1 · Laytime statement summary
+          </h4>
+          {laytimeStatementSummary}
+        </div>
+        <div className="space-y-1.5 p-2 sm:p-3">
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Part 2 · Daily (contract hours, working, demurrage accrual)
+          </h4>
+          {dailyTable}
+        </div>
+        <div className="space-y-1.5 p-2 sm:p-3">
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Part 3 · Port statement &amp; chronology (local day slices, Frac, on demurrage)
+          </h4>
+          {portStatementAndParams}
+          <p className="text-[10px] text-muted-foreground">
+            After allowed laytime is used, excluded weekdays can still accrue (once on demurrage,
+            always on demurrage).{" "}
+            <span className="font-medium text-foreground">Laytime Expires…</span> appears on the
+            chronology row where cumulative time reaches the allowance (including mid-row splits).
+          </p>
+          {chronologyTable ?? (
+            <p className="text-[11px] text-muted-foreground">
+              Run <span className="font-medium text-foreground">Recalculate</span> to generate the
+              chronology grid.
+            </p>
+          )}
+        </div>
+        <div className="space-y-1.5 p-2 sm:p-3">
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Part 4 · SOF event segments (BIMCO-style)
+          </h4>
+          <p className="text-[10px] text-muted-foreground">
+            Each row ends at the closing event;{" "}
+            <span className="font-medium text-foreground">Used h</span> is laytime credited for that
+            segment.
+          </p>
+          {eventsTable}
+        </div>
+      </div>
+    </section>
+  );
+
   if (!priority) {
     return (
       <div className={cn("space-y-4", className)}>
         {auxiliaryBlock}
-        {dailyTable}
-        <Collapsible defaultOpen={false}>
-          <CollapsibleTrigger asChild>
-            <Button type="button" variant="outline" size="sm" className="gap-1.5 text-xs">
-              <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-              Port chronology (Laytime2000-style)
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
-            {chronologyTable ?? (
-              <p className="text-[11px] text-muted-foreground">
-                Run recalculate to generate the chronology grid.
-              </p>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-        <Collapsible defaultOpen={false}>
-          <CollapsibleTrigger asChild>
-            <Button type="button" variant="outline" size="sm" className="gap-1.5 text-xs">
-              <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-              SOF event segments
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
-            <p className="text-[11px] text-muted-foreground">
-              Each row ends at the closing SOF event;{" "}
-              <span className="font-medium text-foreground">Used h</span> is laytime credited for
-              that segment.
-            </p>
-            {eventsTable}
-          </CollapsibleContent>
-        </Collapsible>
+        {unifiedWorksheet}
       </div>
     );
   }
@@ -493,6 +965,16 @@ export function MotherLaytimeTimesheetTable({
       <span>
         <span className="font-medium text-foreground">Qty</span> {fmtQtyMt(c.cargoQtyMt)}
       </span>
+      {c.totalCargoQtyMt != null && c.totalCargoQtyMt > 0 ? (
+        <span title="Vessel-call total cargo (MT)">
+          <span className="font-medium text-foreground">Total</span> {fmtQtyMt(c.totalCargoQtyMt)}
+        </span>
+      ) : null}
+      {c.partialCargoQtyMt != null && c.partialCargoQtyMt > 0 ? (
+        <span title="Partial cargo used for allowance">
+          <span className="font-medium text-foreground">Partial</span> {fmtQtyMt(c.partialCargoQtyMt)}
+        </span>
+      ) : null}
       <span>
         <span className="font-medium text-foreground">Rate</span> {fmtRate(c.dischargeRateMtPerDay)}
       </span>
@@ -516,58 +998,8 @@ export function MotherLaytimeTimesheetTable({
   );
 
   return (
-    <div className={cn("space-y-2", className)}>
-      {strip}
-
-      <section className="space-y-1">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Daily laytime calculation
-        </h3>
-        {dailyTable}
-      </section>
-
-      <section className="space-y-1">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Port chronology (Laytime2000-style)
-        </h3>
-        <p className="text-[10px] text-muted-foreground">
-          Each row is a local calendar slice of an SOF segment. After allowed laytime is consumed,
-          excluded weekdays still accrue (once on demurrage, always on demurrage).
-        </p>
-        {chronologyTable ?? (
-          <p className="text-[11px] text-muted-foreground">
-            Run <span className="font-medium text-foreground">Recalculate</span> to generate the
-            chronology grid.
-          </p>
-        )}
-      </section>
-
-      <section className="space-y-1">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          SOF event segments
-        </h3>
-        <p className="text-[10px] text-muted-foreground">
-          Each row ends at the closing event;{" "}
-          <span className="font-medium text-foreground">Used h</span> is laytime credited for that
-          segment.
-        </p>
-        {eventsTable}
-      </section>
-
-      <Collapsible defaultOpen={false}>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 w-full max-w-md justify-between gap-2 text-xs font-normal text-muted-foreground"
-          >
-            <span>Summary, week detail &amp; legend</span>
-            <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2 space-y-3">{auxiliaryBlock}</CollapsibleContent>
-      </Collapsible>
-    </div>
+    <section id="laytime-worksheet" className={cn("scroll-mt-20 space-y-2", className)}>
+      {dailyTable}
+    </section>
   );
 }

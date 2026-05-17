@@ -158,7 +158,7 @@ export function MasterSofEventTypesCrudPage() {
 
   const fmtScope = (s: string) => s.replace(/_/g, " ");
   const fmtCategory = (c: SofEventTypeCategoryUi) =>
-    c === "HOLD_DELAY" ? "Hold" : "Normal";
+    c === "HOLD_DELAY" ? "Hold" : c === "PREPARATION" ? "Preparation" : "Normal";
 
   const scopeTabs: { id: SofAdminScopeTab; label: string }[] = [
     { id: "ALL", label: "All" },
@@ -284,6 +284,8 @@ export function MasterSofEventTypesCrudPage() {
                       <td className="px-3 py-2">
                         {row.category === "HOLD_DELAY" ? (
                           <Badge variant="warning">Hold</Badge>
+                        ) : row.category === "PREPARATION" ? (
+                          <Badge variant="secondary">Preparation</Badge>
                         ) : (
                           <span className="text-muted-foreground">Normal</span>
                         )}
@@ -430,7 +432,8 @@ export function MasterSofEventTypesCrudPage() {
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
-              Hold flags every SOF event of this type as a hold automatically.
+              Hold excludes laytime; preparation credits separately in the daily sheet; normal counts as
+              discharge / utilize time.
             </p>
           </div>
 

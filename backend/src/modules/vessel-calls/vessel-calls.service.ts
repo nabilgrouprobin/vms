@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma, SOFStatus } from "@prisma/client";
 import { DateTime } from "luxon";
 
 import { PrismaService } from "../../prisma/prisma.service";
@@ -148,6 +148,13 @@ export class VesselCallsService {
       data.status = dto.status;
     }
 
+    if (dto.norTenderedAt !== undefined) {
+      data.norTenderedAt = this.parseIsoDate(dto.norTenderedAt, "norTenderedAt") ?? null;
+    }
+    if (dto.norAcceptedAt !== undefined) {
+      data.norAcceptedAt = this.parseIsoDate(dto.norAcceptedAt, "norAcceptedAt") ?? null;
+    }
+
     if (Object.keys(data).length === 0) {
       return existing;
     }
@@ -265,13 +272,14 @@ export class VesselCallsService {
     }
   }
 
-  /** Hard-delete a vessel call. Refuses if the call has SOF / lighter trips / discharges attached. */
+  /** Hard-delete a vessel call. Removes a draft SOF (and its events) on the same call when allowed. */
   async remove(id: string) {
     const existing = await this.prisma.vesselCall.findFirst({
       where: { id },
       select: {
         id: true,
-        statementOfFacts: { select: { id: true } },
+        callNo: true,
+        statementOfFacts: { select: { id: true, status: true, sofNo: true } },
         _count: {
           select: { lighterTrips: true, lighterAssignments: true }
         }
@@ -280,15 +288,32 @@ export class VesselCallsService {
     if (!existing) {
       throw new NotFoundException("Vessel call was not found");
     }
-    const hasSof = existing.statementOfFacts !== null;
+    const sof = existing.statementOfFacts;
     const { lighterTrips, lighterAssignments } = existing._count;
-    if (hasSof || lighterTrips > 0 || lighterAssignments > 0) {
+
+    if (lighterTrips > 0 || lighterAssignments > 0) {
       throw new BadRequestException(
-        `Cannot delete a vessel call with ${hasSof ? "an attached SOF" : "no SOF"}, ${lighterTrips} lighter trip(s), and ${lighterAssignments} lighter assignment(s).`
+        `Cannot delete vessel call ${existing.callNo}: remove ${lighterTrips} lighter trip(s) and ${lighterAssignments} lighter assignment(s) first.`
       );
     }
+
+    if (sof) {
+      if (sof.status === SOFStatus.APPROVED || sof.status === SOFStatus.CLOSED) {
+        throw new BadRequestException(
+          `Cannot delete vessel call ${existing.callNo} while SOF ${sof.sofNo} is ${sof.status.toLowerCase().replace(/_/g, " ")}. Delete or reopen that SOF from Vessel SOF → Overview first.`
+        );
+      }
+    }
+
     try {
-      await this.prisma.vesselCall.delete({ where: { id } });
+      await this.prisma.$transaction(async (tx) => {
+        if (sof) {
+          await tx.sofEvent.deleteMany({ where: { statementId: sof.id } });
+          await tx.sofHourlyStatus.deleteMany({ where: { statementId: sof.id } });
+          await tx.statementOfFacts.delete({ where: { id: sof.id } });
+        }
+        await tx.vesselCall.delete({ where: { id } });
+      });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError) {
         if (e.code === "P2003") {

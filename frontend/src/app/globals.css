@@ -69,3 +69,55 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* Laytime worksheet / results: `runLaytimeBundlePrint()` toggles `html.print-laytime-mode`. */
+@media print {
+  html.print-laytime-mode {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html.print-laytime-mode [data-app-shell-root] > header,
+  html.print-laytime-mode [data-app-shell-root] > footer {
+    display: none !important;
+  }
+
+  html.print-laytime-mode [data-app-shell-root] > main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  html.print-laytime-mode [data-sof-detail-header] {
+    display: none !important;
+  }
+
+  html.print-laytime-mode [data-sof-tab-list] {
+    display: none !important;
+  }
+
+  html.print-laytime-mode .laytime-print-suppress {
+    display: none !important;
+  }
+
+  html.print-laytime-mode [data-vms-toaster] {
+    display: none !important;
+  }
+
+  html.print-laytime-mode .laytime-print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  html.print-laytime-mode .laytime-print-bundle table {
+    font-size: 8.5px;
+  }
+
+  html.print-laytime-mode .laytime-print-bundle .overflow-x-auto {
+    overflow: visible !important;
+  }
+}
+
+@page {
+  margin: 12mm;
+}

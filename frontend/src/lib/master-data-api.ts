@@ -12,6 +12,7 @@ import type {
   MasterVesselKind,
   MasterVesselRow,
   Paginated,
+  SofEventTypeCategoryUi,
   SofEventTypeOption,
   UserRoleAssignmentRow
 } from "@/types/vms";
@@ -281,8 +282,8 @@ export const purgeMasterGhat = ghatsApi.purge;
 
 const sofEventTypesApi = masterCrud<
   MasterSofEventTypeRow,
-  { name: string; scope: string; category?: "NORMAL" | "HOLD_DELAY" },
-  { name?: string; scope?: string; category?: "NORMAL" | "HOLD_DELAY"; isActive?: boolean }
+  { name: string; scope: string; category?: SofEventTypeCategoryUi },
+  { name?: string; scope?: string; category?: SofEventTypeCategoryUi; isActive?: boolean }
 >("/master-data/sof-event-types");
 
 export const createMasterSofEventType = sofEventTypesApi.create;

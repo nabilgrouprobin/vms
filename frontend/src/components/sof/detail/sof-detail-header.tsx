@@ -20,7 +20,10 @@ export function SofDetailHeader({
   status: string;
 }) {
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div
+      data-sof-detail-header
+      className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+    >
       <div>
         {!hideWorkspaceChrome ? (
           <Button variant="ghost" size="sm" asChild className="mb-1 -ml-2 h-8 px-2">

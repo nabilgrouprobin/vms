@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { SofLaytimeCountToggle } from "@/components/sof/sof-laytime-count-toggle";
 import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { cn } from "@/lib/utils";
 import type { SofEventTypeOption } from "@/types/vms";
@@ -27,6 +28,9 @@ export type SofAddEventFields = {
   setEvRemarks: (v: string) => void;
   evHoldReason: string;
   setEvHoldReason: (v: string) => void;
+  /** Default true — counts toward laytime “to count” on the daily sheet. */
+  evCountsAsLaytime: boolean;
+  setEvCountsAsLaytime: (v: boolean) => void;
   evErr: string | null;
 };
 
@@ -69,6 +73,8 @@ export function SofAddEventSheet({
     setEvRemarks,
     evHoldReason,
     setEvHoldReason,
+    evCountsAsLaytime,
+    setEvCountsAsLaytime,
     evErr
   } = fields;
 
@@ -164,6 +170,18 @@ export function SofAddEventSheet({
                 <span className="text-muted-foreground">Not signed in</span>
               )}
             </div>
+          </div>
+          <div className="space-y-2 rounded-lg border border-border/80 bg-muted/10 p-3">
+            <Label className="text-xs">Laytime (contact window)</Label>
+            <SofLaytimeCountToggle
+              value={evCountsAsLaytime}
+              onChange={setEvCountsAsLaytime}
+            />
+            <p className="text-[10px] leading-snug text-muted-foreground">
+              Default is{" "}
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">Count</span>.
+              Use not count for idle time inside contact hours on the daily sheet.
+            </p>
           </div>
           {selectedIsHold ? (
             <div className="space-y-2">

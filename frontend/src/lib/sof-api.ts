@@ -199,8 +199,23 @@ export type LaytimeBreakdown = {
   currency: string | null;
 };
 
+/** Optional header lines for Laytime2000-style “port statement” above the chronology grid. */
+export type LaytimePortStatementContext = {
+  vesselName: string | null;
+  voyageLine: string | null;
+  portName: string | null;
+  operationLabel: string;
+  arrivedLine: string | null;
+  norTenderedLine: string | null;
+  inBerthOrWorkingLine: string | null;
+};
+
 export type MotherLaytimeContractSummary = {
   cargoQtyMt: number | null;
+  /** Total vessel-call or trip cargo (MT) for partial % display */
+  totalCargoQtyMt?: number | null;
+  /** SOF partial cargo (MT) when set for allowance */
+  partialCargoQtyMt?: number | null;
   dischargeRateMtPerDay: number | null;
   dischargeRateUnit: string | null;
   allowedHours: number | null;
@@ -242,19 +257,39 @@ export type MotherLaytimeTimesheet = {
 export type MotherLaytimeDailyLedgerRow = {
   date: string;
   weekday: string;
+  durationHour: number;
   contactHour: number;
+  freeTimeHour: number;
+  toCountHour: number;
+  notToCountHour: number;
+  /** @deprecated Use `toCountHour`. */
   workingHour: number;
+  /** @deprecated Use `notToCountHour`. */
   idleHour: number;
+  cumulativeTotalUsedHour: number;
+  despatchHour: number;
   demurrageHour: number;
+  preparationHour?: number;
+  creditedLaytimeHour?: number;
+  cumulativeCreditedHour?: number;
+  onDemurrage: boolean;
+  laytimeExpiresThisDay: boolean;
   dischargeQtyMt: number | null;
   activityDetails: string;
 };
 
 export type MotherLaytimeDailyLedger = {
   rows: MotherLaytimeDailyLedgerRow[];
+  totalDurationHour?: number;
   totalContactHour: number;
+  totalToCountHour?: number;
+  totalNotToCountHour?: number;
   totalWorkingHour: number;
+  totalPreparationHour?: number;
+  totalFreeTimeHour: number;
+  totalCreditedLaytimeHour: number;
   totalIdleHour: number;
+  totalDespatchHour?: number;
   totalDemurrageHour: number;
   totalDischargeQtyMt: number;
 };
@@ -287,16 +322,27 @@ export type MotherLaytimeRecalculateResult = LaytimeRecalculateResult & {
 /** Lighter SOF laytime recalculation now returns the same shape as mother (contract + daily sheet). */
 export type LighterLaytimeRecalculateResult = MotherLaytimeRecalculateResult;
 
-export function recalculateMotherLaytime(sofId: string) {
+export type RecalculateLaytimeWeekBody = {
+  laytimeExcludedTimePeriod?: string | null;
+  laytimeExcludedDays?: string[];
+};
+
+export function recalculateMotherLaytime(sofId: string, week?: RecalculateLaytimeWeekBody) {
   return api<MotherLaytimeRecalculateResult>(
     `${prefix}/mother-vessels/${sofId}/laytime/recalculate`,
-    { method: "POST" }
+    {
+      method: "POST",
+      ...(week ? { body: JSON.stringify(week) } : {})
+    }
   );
 }
 
-export function recalculateLighterLaytime(sofId: string) {
+export function recalculateLighterLaytime(sofId: string, week?: RecalculateLaytimeWeekBody) {
   return api<LighterLaytimeRecalculateResult>(
     `${prefix}/lighter-vessels/${sofId}/laytime/recalculate`,
-    { method: "POST" }
+    {
+      method: "POST",
+      ...(week ? { body: JSON.stringify(week) } : {})
+    }
   );
 }

@@ -25,6 +25,7 @@ export function Toaster() {
 
   return (
     <div
+      data-vms-toaster
       aria-live="polite"
       aria-atomic="true"
       className="pointer-events-none fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4 sm:bottom-6 sm:right-6 sm:left-auto sm:items-end sm:px-0"

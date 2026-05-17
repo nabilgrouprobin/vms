@@ -15,7 +15,7 @@ export const SOF_EVENT_TYPE_SCOPES = ["MOTHER_VESSEL", "LIGHTER_VESSEL", "BOTH"]
 export type SofEventTypeScopeUi = (typeof SOF_EVENT_TYPE_SCOPES)[number];
 
 /** Hold vs normal — drives the SOF event's `isHold` automatically from the event type. */
-export const SOF_EVENT_TYPE_CATEGORIES = ["NORMAL", "HOLD_DELAY"] as const;
+export const SOF_EVENT_TYPE_CATEGORIES = ["NORMAL", "PREPARATION", "HOLD_DELAY"] as const;
 export type SofEventTypeCategoryUi = (typeof SOF_EVENT_TYPE_CATEGORIES)[number];
 
 export type SofEventTypeOption = {
@@ -387,6 +387,8 @@ export type SofEventListItem = {
   /** Whole minutes from period start to `eventTime`; preferred over `durationHours`. */
   durationMinutes?: number | null;
   remarks: string | null;
+  /** When true, segment hours count as laytime “to count” in the daily sheet (default true). */
+  countsAsLaytime?: boolean;
   isHold: boolean;
   holdReason: string | null;
   robQuantityMt: string | null;

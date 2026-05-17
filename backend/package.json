@@ -8,6 +8,7 @@
     "db:clean-minimal": "tsx scripts/db-clean-minimal.ts",
     "db:seed-users": "tsx scripts/db-seed-users-only.ts",
     "test": "find src -name '*.spec.ts' -print0 | xargs -0 tsx --test",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
     "dev": "nest start --watch --path tsconfig.build.json",
     "start": "node dist/main.js"
   },

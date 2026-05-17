@@ -21,7 +21,10 @@ const ORDER: Record<"mother" | "lighter", VesselSofWorkspaceSection[]> = {
 export function SofDetailTabStrip({ variant }: { variant: "mother" | "lighter" }) {
   const keys = ORDER[variant];
   return (
-    <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1 sm:inline-flex sm:h-9 sm:w-auto sm:flex-nowrap">
+    <TabsList
+      data-sof-tab-list
+      className="flex h-auto w-full flex-wrap justify-start gap-1 p-1 sm:inline-flex sm:h-9 sm:w-auto sm:flex-nowrap"
+    >
       {keys.map((value) => (
         <TabsTrigger key={value} value={value} className={TAB_TRIGGER_CLASS}>
           {LABELS[value]}

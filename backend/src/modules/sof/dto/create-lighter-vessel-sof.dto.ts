@@ -36,6 +36,9 @@ export class CreateLighterVesselSofDto {
   laytimeBalanceHours?: string | number;
 
   @Allow()
+  laytimePartialCargoMt?: string | number;
+
+  @Allow()
   demurrageAmount?: string | number;
 
   @Allow()

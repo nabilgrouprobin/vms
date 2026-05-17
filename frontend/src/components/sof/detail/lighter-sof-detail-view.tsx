@@ -3,7 +3,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   SofAddEventSheet,
@@ -13,9 +14,11 @@ import {
 import { SofDetailHeader } from "@/components/sof/detail/sof-detail-header";
 import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-tab";
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
+import { SofLaytimePersistBar } from "@/components/sof/sof-laytime-persist-bar";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
 import { useUserProfile } from "@/components/providers/auth-provider";
 import { useAutoLoadAllPages } from "@/hooks/use-auto-load-all-pages";
+import { useSofLaytimeRecalculate } from "@/hooks/use-sof-laytime-recalculate";
 import {
   ImportContractLaytimeForm,
   VesselCallImportContractLinkPanel
@@ -26,7 +29,14 @@ import {
   LighterTripOverviewPanel,
   type LighterTripDetail
 } from "@/components/sof/lighter-sof-panels";
+import { LaytimeCalculationResultsPanel } from "@/components/sof/laytime-calculation-results-panel";
 import { MotherLaytimeTimesheetTable } from "@/components/sof/mother-laytime-timesheet-table";
+import { SofLaytimeStatementParamsCard } from "@/components/sof/sof-laytime-statement-params-card";
+import { SofEventsVesselLaytimeSetupCard } from "@/components/sof/sof-events-vessel-laytime-setup-card";
+import {
+  SofLaytimeSetupSidebarCard,
+  type LaytimeWeekPayloadGetter
+} from "@/components/sof/sof-laytime-setup-sidebar-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -47,6 +57,7 @@ import {
 import { fetchSofEventTypeOptions } from "@/lib/master-data-api";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import { VESSEL_SOF_CLEAR_SELECTION_EVENT } from "@/lib/workspace-paths";
 import { patchVesselCall } from "@/lib/vessel-calls-api";
 import {
@@ -56,10 +67,7 @@ import {
   fetchLighterSofEvents,
   recalculateLighterLaytime,
   updateLighterSof,
-  type LaytimeBreakdown,
-  type LaytimeChronologyRow,
-  type MotherLaytimeDailyLedger,
-  type MotherLaytimeTimesheet
+  type LaytimePortStatementContext
 } from "@/lib/sof-api";
 import {
   DEFAULT_LAYTIME_IANA_ZONE,
@@ -79,11 +87,25 @@ type LighterSofDetail = {
   remarks: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  updatedAt: string;
   laytimeAllowedHours: string | null;
   laytimeUsedHours: string | null;
   laytimeExcludedHours: string | null;
   laytimeBalanceHours: string | null;
   laytimeCommenceAt: string | null;
+  laytimePartialCargoMt: string | null;
+  laytimeDischargeRateMtPerDay: string | null;
+  laytimeExcludedTimePeriod: string | null;
+  laytimeExcludedDays: string[];
+  laytimeHolidays: Array<{
+    id: string;
+    name: string;
+    holidayStartAt: string;
+    holidayEndAt: string;
+    eveContactEndHm: string | null;
+    postContactStartHm: string | null;
+    sortOrder: number;
+  }>;
   demurrageAmount: string | null;
   dispatchAmount: string | null;
   netAmount: string | null;
@@ -110,6 +132,9 @@ export function LighterSofDetailView({
   hideWorkspaceChrome?: boolean;
 }) {
   const qc = useQueryClient();
+  const pathname = usePathname();
+  const laytimePrintSuppressChrome =
+    workspaceSection === "laytime" || (pathname?.includes("/vessel-sof/laytime") ?? false);
 
   const sofQ = useQuery({
     queryKey: ["lighter-sof", id],
@@ -203,6 +228,7 @@ export function LighterSofDetailView({
   const [evStartTime, setEvStartTime] = useState("");
   const [evRemarks, setEvRemarks] = useState("");
   const [evHoldReason, setEvHoldReason] = useState("");
+  const [evCountsAsLaytime, setEvCountsAsLaytime] = useState(true);
   const [evErr, setEvErr] = useState<string | null>(null);
   const [addEventOpen, setAddEventOpen] = useState(false);
   /**
@@ -236,6 +262,7 @@ export function LighterSofDetailView({
   }) => {
     setEvErr(null);
     setEvHoldReason("");
+    setEvCountsAsLaytime(true);
 
     if (!prefill || !prefill.startIso || !prefill.endIso) {
       if (prefill?.endIso) setEvTime(toLocalDtInput(prefill.endIso));
@@ -291,12 +318,10 @@ export function LighterSofDetailView({
     setAddEventOpen(true);
   };
 
-  const [layRecalc, setLayRecalc] = useState<{
-    breakdown: LaytimeBreakdown;
-    timesheet: MotherLaytimeTimesheet;
-    dailyLedger: MotherLaytimeDailyLedger;
-    chronology: LaytimeChronologyRow[];
-  } | null>(null);
+  const weekPayloadRef = useRef<LaytimeWeekPayloadGetter | null>(null);
+  const registerWeekPayload = useCallback((getter: LaytimeWeekPayloadGetter | null) => {
+    weekPayloadRef.current = getter;
+  }, []);
 
   const patchVcLayTzMut = useMutation({
     mutationFn: async () => {
@@ -312,19 +337,109 @@ export function LighterSofDetailView({
     onError: (e) => toast.error(parseApiErr(e))
   });
 
-  const layRecalcMut = useMutation({
-    mutationFn: () => recalculateLighterLaytime(id),
-    onSuccess: (res) => {
-      setLayRecalc({
-        breakdown: res.breakdown,
-        timesheet: res.timesheet,
-        dailyLedger: res.dailyLedger,
-        chronology: res.chronology ?? []
-      });
-      void qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
-    },
-    onError: (e) => toast.error(parseApiErr(e))
+  const onLaytimeOrEventsView =
+    workspaceSection === "laytime" ||
+    workspaceSection === "events" ||
+    (pathname?.includes("/vessel-sof/laytime") ?? false) ||
+    (pathname?.includes("/vessel-sof/events") ?? false);
+
+  const {
+    layRecalc,
+    layRecalcPending,
+    saveLaytimePending,
+    runLaytimeRecalculate,
+    scheduleLaytimeRecalculate,
+    saveLaytimeToDatabase
+  } = useSofLaytimeRecalculate({
+    sofId: id,
+    eventsQueryKey: ["lighter-sof-events", id],
+    detailQueryKey: ["lighter-sof", id],
+    recalculate: () => recalculateLighterLaytime(id, weekPayloadRef.current?.() ?? undefined),
+    vesselCallId: sof?.lighterTrip?.vesselCall?.id,
+    sofStatus: sof?.status,
+    eventRows,
+    autoRecalcEnabled: onLaytimeOrEventsView
   });
+
+  const lighterLaytimePortStatement = useMemo((): LaytimePortStatementContext | undefined => {
+    const trip = sof?.lighterTrip;
+    const vc = trip?.vesselCall;
+    if (!trip || !vc) return undefined;
+    const port = vc.arrivalLocation?.name ?? vc.importContract?.dischargePort ?? null;
+    const arrivedTs = trip.arrivedGhatDate ?? vc.ata;
+    const arrivedLine =
+      arrivedTs != null
+        ? port != null
+          ? `${formatDt(arrivedTs)} · ${port}`
+          : formatDt(arrivedTs)
+        : port;
+    const voyageLine =
+      [vc.vessel?.name, vc.callNo, `Trip ${trip.tripNo}`].filter(Boolean).join(" · ") || null;
+    return {
+      vesselName: trip.lighterVessel?.name ?? null,
+      voyageLine,
+      portName: port,
+      operationLabel: "Discharging (lighter)",
+      arrivedLine: arrivedLine ?? null,
+      norTenderedLine: vc.norTenderedAt ? formatDt(vc.norTenderedAt) : null,
+      inBerthOrWorkingLine:
+        trip.unloadStartedAt != null
+          ? `Unload started ${formatDt(trip.unloadStartedAt)}`
+          : trip.alongsideDate != null
+            ? `Alongside ${formatDt(trip.alongsideDate)}`
+            : null
+    };
+  }, [sof?.lighterTrip]);
+
+  const laytimeCargoAllowance = useMemo(() => {
+    const vc = sof?.lighterTrip?.vesselCall;
+    if (!vc?.id) return undefined;
+    return {
+      contractId: vc.importContract?.id ?? null,
+      vesselCallId: vc.id,
+      vesselCallApproxTotalWeightTon: vc.approxTotalWeightTon ?? null,
+      laytimePartialCargoMt: sof?.laytimePartialCargoMt ?? null,
+      laytimeDischargeRateMtPerDay: sof?.laytimeDischargeRateMtPerDay ?? null,
+      readOnly: sof?.status === "CLOSED",
+      patchSof: (body: Record<string, unknown>) => updateLighterSof(id, body),
+      invalidateQueryKeys: [["lighter-sof", id]],
+      onAfterSave: () => void scheduleLaytimeRecalculate()
+    };
+  }, [
+    sof?.lighterTrip?.vesselCall?.id,
+    sof?.lighterTrip?.vesselCall?.importContract?.id,
+    sof?.lighterTrip?.vesselCall?.approxTotalWeightTon,
+    sof?.laytimePartialCargoMt,
+    sof?.laytimeDischargeRateMtPerDay,
+    sof?.status,
+    id,
+    scheduleLaytimeRecalculate
+  ]);
+
+  const laytimeWeekWindow = useMemo(() => {
+    const vc = sof?.lighterTrip?.vesselCall;
+    if (!sof?.id || !vc?.id) return undefined;
+    return {
+      laytimeExcludedTimePeriod: sof.laytimeExcludedTimePeriod,
+      laytimeExcludedDays: sof.laytimeExcludedDays ?? [],
+      contractId: vc.importContract?.id ?? null,
+      readOnly: sof.status === "CLOSED",
+      patchSof: (body: Record<string, unknown>) => updateLighterSof(id, body),
+      invalidateQueryKeys: [["lighter-sof", id]],
+      onRegisterWeekPayload: registerWeekPayload,
+      onAfterSave: () => void scheduleLaytimeRecalculate()
+    };
+  }, [
+    sof?.id,
+    sof?.laytimeExcludedTimePeriod,
+    sof?.laytimeExcludedDays,
+    sof?.lighterTrip?.vesselCall?.id,
+    sof?.lighterTrip?.vesselCall?.importContract?.id,
+    sof?.status,
+    id,
+    registerWeekPayload,
+    scheduleLaytimeRecalculate
+  ]);
 
   const addEvMut = useMutation({
     mutationFn: () => {
@@ -350,17 +465,20 @@ export function LighterSofDetailView({
           : {}),
         remarks: evRemarks || undefined,
         isHold,
+        countsAsLaytime: evCountsAsLaytime,
         ...(isHold && evHoldReason.trim() ? { holdReason: evHoldReason.trim() } : {})
       });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setEvErr(null);
       setEvRemarks("");
       setEvStartTime("");
       setEvHoldReason("");
+      setEvCountsAsLaytime(true);
       setAddEventOpen(false);
-      qc.invalidateQueries({ queryKey: ["lighter-sof-events", id] });
-      qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
+      void qc.invalidateQueries({ queryKey: ["lighter-sof-events", id] });
+      void qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
+      scheduleLaytimeRecalculate();
     },
     onError: (e) => {
       const msg = parseApiErr(e);
@@ -386,9 +504,11 @@ export function LighterSofDetailView({
       setEvRemarks,
       evHoldReason,
       setEvHoldReason,
+      evCountsAsLaytime,
+      setEvCountsAsLaytime,
       evErr
     }),
-    [evType, evTime, evStartTime, evRemarks, evHoldReason, evErr]
+    [evType, evTime, evStartTime, evRemarks, evHoldReason, evCountsAsLaytime, evErr]
   );
 
   const laytimeSnapshot = useMemo(() => {
@@ -428,6 +548,45 @@ export function LighterSofDetailView({
 
   const vc = sof.lighterTrip?.vesselCall;
   const inWorkspace = Boolean(workspaceSection);
+
+  const laytimeSheetsStrip = (
+    <SofDetailLaytimeSheetsStrip
+      heading="Laytime worksheet (lighter)"
+      idleHint="Updates automatically when you change events or Count / Not count."
+      breakdown={layRecalc?.breakdown}
+      recalculateDisabled={layRecalcPending || sof.status === "CLOSED"}
+      recalculatePending={layRecalcPending}
+      onRecalculate={() => void runLaytimeRecalculate().catch((e) => toast.error(parseApiErr(e)))}
+    />
+  );
+
+  const laytimeDailySheetBlock =
+    layRecalcPending && !layRecalc ? (
+      <Skeleton className="h-48 w-full rounded-xl" />
+    ) : layRecalc ? (
+      <MotherLaytimeTimesheetTable
+        dailyLedger={layRecalc.dailyLedger}
+        timesheet={layRecalc.timesheet}
+        breakdown={layRecalc.breakdown}
+        chronology={layRecalc.chronology}
+        portStatement={lighterLaytimePortStatement}
+      />
+    ) : (
+      <p className="text-[11px] text-muted-foreground">
+        Laytime sheet loads when you open this tab or change an event. Click Recalculate if it
+        stays empty.
+      </p>
+    );
+
+  const laytimePersistBar = vc?.id ? (
+    <SofLaytimePersistBar
+      readOnly={sof.status === "CLOSED"}
+      pending={saveLaytimePending}
+      breakdown={layRecalc?.breakdown}
+      dailyLedger={layRecalc?.dailyLedger}
+      onSaveLaytime={() => void saveLaytimeToDatabase()}
+    />
+  ) : null;
 
   const header = (
     <SofDetailHeader
@@ -572,9 +731,11 @@ export function LighterSofDetailView({
             readOnly={sof.status === "CLOSED"}
             eventsQueryKey={["lighter-sof-events", id]}
             eventsCsvBasename={`${sof.sofNo}-events`}
-            onEventsChanged={() => {
-              void qc.invalidateQueries({ queryKey: ["lighter-sof", id] });
-            }}
+            onEventsChanged={() => scheduleLaytimeRecalculate()}
+            laytimeRecalcPending={layRecalcPending}
+            laytimeBreakdown={layRecalc?.breakdown}
+            laytimeDailyLedger={layRecalc?.dailyLedger}
+            onSaveLaytime={() => void saveLaytimeToDatabase()}
             pagination={{
               hasNextPage: eventsQ.hasNextPage,
               isFetchingNextPage: eventsQ.isFetchingNextPage,
@@ -593,87 +754,127 @@ export function LighterSofDetailView({
               </CardContent>
             </Card>
           ) : (
+            <>
             <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-              <div className="order-1 min-w-0 flex-1 space-y-2 xl:order-2">
-                <SofDetailLaytimeSheetsStrip
-                  heading="Laytime sheets (lighter)"
-                  idleHint="Recalculate to load the daily sheet (same engine as mother vessel, using this trip's cargo for discharge-rate time)."
-                  breakdown={layRecalc?.breakdown}
-                  recalculateDisabled={layRecalcMut.isPending || sof.status === "CLOSED"}
-                  recalculatePending={layRecalcMut.isPending}
-                  onRecalculate={() => layRecalcMut.mutate()}
-                />
+              <div className="order-1 min-w-0 flex-1 xl:order-2">
+                <div className="laytime-print-bundle space-y-2">
+                  {laytimeSheetsStrip}
 
-                {laytimeSnapshot ? (
-                  <Collapsible defaultOpen={false}>
-                    <CollapsibleTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-full justify-between px-2 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        <span>Stored snapshot (manual overrides)</span>
-                        <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-1">
-                      <LaytimeSnapshotToolbar
-                        variant="lighter"
-                        sofId={id}
-                        readOnly={sof.status === "CLOSED"}
-                        snapshot={laytimeSnapshot}
-                        detailQueryKey={["lighter-sof", id]}
-                        compact
-                      />
-                    </CollapsibleContent>
-                  </Collapsible>
-                ) : null}
-
-                {layRecalc ? (
-                  <MotherLaytimeTimesheetTable
-                    dailyLedger={layRecalc.dailyLedger}
-                    timesheet={layRecalc.timesheet}
-                    breakdown={layRecalc.breakdown}
-                    chronology={layRecalc.chronology}
+                  <LaytimeCalculationResultsPanel
+                    sofNo={sof.sofNo}
+                    breakdown={layRecalc?.breakdown ?? null}
+                    timesheet={layRecalc?.timesheet ?? null}
+                    portStatement={lighterLaytimePortStatement ?? null}
                   />
-                ) : null}
+
+                  {laytimeSnapshot ? (
+                    <Collapsible defaultOpen={false}>
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="laytime-print-suppress h-8 w-full justify-between px-2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <span>Stored snapshot (manual overrides)</span>
+                          <ChevronDown className="size-3.5 shrink-0 opacity-70" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-1">
+                        <LaytimeSnapshotToolbar
+                          variant="lighter"
+                          sofId={id}
+                          readOnly={sof.status === "CLOSED"}
+                          snapshot={laytimeSnapshot}
+                          detailQueryKey={["lighter-sof", id]}
+                          compact
+                        />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ) : null}
+
+                  {laytimeDailySheetBlock}
+                </div>
               </div>
 
-              <aside className="order-2 space-y-2 xl:order-1 xl:w-[min(17rem,26vw)] xl:shrink-0 xl:rounded-lg xl:border xl:border-border xl:bg-muted/15 xl:p-2 xl:sticky xl:top-3 xl:self-start xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto">
-                {vc.importContract?.id ? (
-                  <Card className="shadow-sm xl:shadow-none">
-                    <CardHeader className="space-y-1 px-3 py-2 pb-0">
-                      <CardTitle className="text-sm font-semibold">Contract &amp; week</CardTitle>
-                      <CardDescription className="text-[10px] leading-snug line-clamp-2">
-                        Terms from the mother vessel call’s import contract. Trip cargo quantity
-                        drives discharge-rate laytime when filled.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3 pt-2">
-                      <ImportContractLaytimeForm
-                        contractId={vc.importContract.id}
-                        embedded
-                        embeddedCompact
-                        readOnly={sof.status === "CLOSED"}
-                        vesselCallId={vc.id}
-                        vesselCallApproxTotalWeightTon={vc.approxTotalWeightTon ?? null}
-                        onSaved={() => void qc.invalidateQueries({ queryKey: ["lighter-sof", id] })}
-                        onUnlinked={() =>
-                          void qc.invalidateQueries({ queryKey: ["lighter-sof", id] })
-                        }
-                      />
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <VesselCallImportContractLinkPanel
-                    vesselCallId={vc.id}
-                    readOnly={sof.status === "CLOSED"}
-                    onLinked={() => void qc.invalidateQueries({ queryKey: ["lighter-sof", id] })}
-                  />
+              <aside
+                className={cn(
+                  "order-2 space-y-2 xl:order-1 xl:w-[min(16rem,24vw)] xl:shrink-0 xl:rounded-lg xl:border xl:border-border xl:bg-muted/15 xl:p-2 xl:sticky xl:top-3 xl:self-start xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto",
+                  laytimePrintSuppressChrome && "laytime-print-suppress"
                 )}
+              >
+                <SofLaytimeSetupSidebarCard
+                  cargo={laytimeCargoAllowance}
+                  week={laytimeWeekWindow}
+                />
+                <Collapsible defaultOpen={false} className="laytime-print-suppress">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-full justify-between rounded-md border border-border/60 bg-card/50 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      <span>Contract, NOR &amp; holidays</span>
+                      <ChevronDown className="size-3.5 shrink-0 opacity-70" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-2 pt-2">
+                    {vc.importContract?.id ? (
+                      <Card className="shadow-sm xl:shadow-none">
+                        <CardHeader className="space-y-1 px-3 py-2 pb-0">
+                          <CardTitle className="text-sm font-semibold">Import contract</CardTitle>
+                          <CardDescription className="text-[10px] leading-snug line-clamp-2">
+                            Demurrage, dispatch, and other CP terms.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="px-3 pb-3 pt-2">
+                          <ImportContractLaytimeForm
+                            contractId={vc.importContract.id}
+                            embedded
+                            embeddedCompact
+                            showCargoFields={false}
+                            showWeekFields={false}
+                            readOnly={sof.status === "CLOSED"}
+                            vesselCallId={vc.id}
+                            vesselCallApproxTotalWeightTon={vc.approxTotalWeightTon ?? null}
+                            onSaved={() => void qc.invalidateQueries({ queryKey: ["lighter-sof", id] })}
+                            onUnlinked={() =>
+                              void qc.invalidateQueries({ queryKey: ["lighter-sof", id] })
+                            }
+                          />
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <VesselCallImportContractLinkPanel
+                        vesselCallId={vc.id}
+                        readOnly={sof.status === "CLOSED"}
+                        onLinked={() => void qc.invalidateQueries({ queryKey: ["lighter-sof", id] })}
+                      />
+                    )}
 
-                <Card className="shadow-sm xl:shadow-none">
+                    <SofEventsVesselLaytimeSetupCard
+                      vesselCall={vc ?? undefined}
+                      readOnly={sof.status === "CLOSED"}
+                      invalidateQueryKeys={[["lighter-sof", id]]}
+                      showContractLink={false}
+                      showWeek={false}
+                      showNor
+                      onNorSaved={() => {
+                        if (sof.status !== "CLOSED") void runLaytimeRecalculate();
+                      }}
+                    />
+                    <SofLaytimeStatementParamsCard
+                      readOnly={sof.status === "CLOSED"}
+                      serverSyncToken={sof.updatedAt}
+                      laytimePartialCargoMt={sof.laytimePartialCargoMt}
+                      laytimeHolidays={sof.laytimeHolidays}
+                      patchSof={(body) => updateLighterSof(id, body)}
+                      invalidateQueryKeys={[["lighter-sof", id]]}
+                      showPartialCargo={false}
+                    />
+
+                    <Card className="shadow-sm xl:shadow-none">
                   <CardHeader className="space-y-0 px-3 py-2 pb-0">
                     <CardTitle className="text-sm font-semibold">Calendar zone</CardTitle>
                   </CardHeader>
@@ -738,8 +939,12 @@ export function LighterSofDetailView({
                     </Button>
                   </CardContent>
                 </Card>
+                  </CollapsibleContent>
+                </Collapsible>
               </aside>
             </div>
+            {laytimePersistBar}
+            </>
           )}
         </TabsContent>
 

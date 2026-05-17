@@ -270,6 +270,7 @@ enum EventDirection {
 
 enum SofEventTypeCategory {
   NORMAL
+  PREPARATION
   HOLD_DELAY
 }
 
@@ -2753,6 +2754,13 @@ model StatementOfFacts {
   approvedBy           String?   @map("approved_by")
   approvedAt           DateTime? @map("approved_at")
   remarks              String?
+  /// Optional partial cargo (MT) for laytime allowance; when set with rate, allowed = (partial / rate) × 24
+  laytimePartialCargoMt Decimal?  @map("laytime_partial_cargo_mt") @db.Decimal(18, 3)
+  /// Discharge rate (MT/day) on this SOF when contract rate is not used
+  laytimeDischargeRateMtPerDay Decimal? @map("laytime_discharge_rate_mt_per_day") @db.Decimal(18, 2)
+  /// Manual working week marker + notes for laytime (overrides import contract when set)
+  laytimeExcludedTimePeriod String?  @map("laytime_excluded_time_period")
+  laytimeExcludedDays       String[] @default([]) @map("laytime_excluded_days")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
@@ -2760,6 +2768,7 @@ model StatementOfFacts {
   lighterTrip    LighterTrip?      @relation(fields: [lighterTripId], references: [id])
   events         SofEvent[]
   hourlyStatuses SofHourlyStatus[]
+  laytimeHolidays SofLaytimeHoliday[]
   verifiedByUser User?             @relation("SofVerifier", fields: [verifiedBy], references: [id])
 
   @@index([sofNo])
@@ -2770,6 +2779,26 @@ model StatementOfFacts {
   @@index([scope, startedAt])
   @@index([scope, completedAt])
   @@map("statements_of_fact")
+}
+
+model SofLaytimeHoliday {
+  id                 String   @id @default(cuid())
+  statementId        String   @map("statement_id")
+  name               String
+  holidayStartAt     DateTime @map("holiday_start_at")
+  holidayEndAt       DateTime @map("holiday_end_at")
+  /// HH:mm in laytime zone — day before holiday, contact window ends at this clock (optional)
+  eveContactEndHm    String?  @map("eve_contact_end_hm") @db.VarChar(5)
+  /// HH:mm in laytime zone — day after holiday, contact window starts at this clock (optional)
+  postContactStartHm String?  @map("post_contact_start_hm") @db.VarChar(5)
+  sortOrder          Int      @default(0) @map("sort_order")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  statement StatementOfFacts @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId])
+  @@map("sof_laytime_holidays")
 }
 
 model SofEvent {

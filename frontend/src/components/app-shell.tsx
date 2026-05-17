@@ -238,7 +238,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isAuthPage = pathname === "/login" || pathname === "/signup";
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div data-app-shell-root className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md">
         <div className="flex h-14 w-full items-center justify-between gap-4 px-4">
           <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">

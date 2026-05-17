@@ -1,5 +1,8 @@
 import { SOFStatus } from "@prisma/client";
-import { Allow, IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
+import { Type } from "class-transformer";
+import { Allow, IsArray, IsEnum, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
+
+import { SofLaytimeHolidayRowDto } from "./sof-laytime-holiday-row.dto";
 
 export class UpdateMotherVesselSofDto {
   @IsOptional()
@@ -30,6 +33,36 @@ export class UpdateMotherVesselSofDto {
 
   @Allow()
   laytimeBalanceHours?: string | number | null;
+
+  /** Optional partial cargo (MT) for discharge-rate allowance; null clears. */
+  @Allow()
+  laytimePartialCargoMt?: string | number | null;
+
+  /** Discharge rate (MT/day) on this SOF; null clears. Used when contract rate is absent. */
+  @Allow()
+  laytimeDischargeRateMtPerDay?: string | number | null;
+
+  /** Working week marker line for laytime calendar; null clears. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  laytimeExcludedTimePeriod?: string | null;
+
+  /** Weekday codes excluded from segment counting when SOF week is set. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  laytimeExcludedDays?: string[];
+
+  /**
+   * When present (including `[]`), replaces all SOF laytime holidays for this statement.
+   * Omit the field to leave existing holidays unchanged.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SofLaytimeHolidayRowDto)
+  laytimeHolidays?: SofLaytimeHolidayRowDto[];
 
   /** Snapshot commence instant on the SOF (ISO string or null to clear). */
   @IsOptional()
