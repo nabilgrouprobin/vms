@@ -116,6 +116,64 @@ body {
   html.print-laytime-mode .laytime-print-bundle .overflow-x-auto {
     overflow: visible !important;
   }
+
+  html.print-events-mode {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html.print-events-mode [data-app-shell-root] > header,
+  html.print-events-mode [data-app-shell-root] > footer {
+    display: none !important;
+  }
+
+  html.print-events-mode [data-app-shell-root] > main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  html.print-events-mode .laytime-print-suppress,
+  html.print-events-mode [data-vms-toaster] {
+    display: none !important;
+  }
+
+  html.print-events-mode #sof-events-print {
+    break-inside: avoid;
+  }
+
+  html.print-events-mode #sof-events-print table {
+    font-size: 9px;
+  }
+}
+
+/* Toast notifications — subtle slide */
+@keyframes vms-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes vms-toast-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.vms-toast-enter {
+  animation: vms-toast-enter 0.2s ease-out both;
+}
+
+.vms-toast-exit {
+  animation: vms-toast-exit 0.18s ease-in both;
 }
 
 @page {

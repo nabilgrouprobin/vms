@@ -117,18 +117,6 @@ export function useSofLaytimeRecalculate({
     return enqueueLaytimeRecalculate();
   }, [enqueueLaytimeRecalculate]);
 
-  const saveLaytimeToDatabase = useCallback(async () => {
-    setSaveLaytimePending(true);
-    try {
-      await runLaytimeRecalculateNow();
-      toast.success("Laytime calculation saved to database");
-    } catch (e) {
-      toast.error(parseApiErr(e));
-    } finally {
-      setSaveLaytimePending(false);
-    }
-  }, [runLaytimeRecalculateNow]);
-
   const eventsLaytimeKey = useMemo(
     () =>
       eventRows
@@ -136,6 +124,20 @@ export function useSofLaytimeRecalculate({
         .join("|"),
     [eventRows]
   );
+
+  const saveLaytimeToDatabase = useCallback(async () => {
+    setSaveLaytimePending(true);
+    try {
+      lastAutoKeyRef.current = null;
+      await runLaytimeRecalculateNow();
+      lastAutoKeyRef.current = eventsLaytimeKey;
+      toast.success("Laytime saved — daily sheet matches current SOF events.");
+    } catch (e) {
+      toast.error(parseApiErr(e));
+    } finally {
+      setSaveLaytimePending(false);
+    }
+  }, [runLaytimeRecalculateNow, eventsLaytimeKey]);
 
   useEffect(() => {
     if (!autoRecalcEnabled || sofStatus === "CLOSED" || !vesselCallId || eventRows.length === 0) {
@@ -149,6 +151,29 @@ export function useSofLaytimeRecalculate({
     eventsLaytimeKey,
     eventRows.length,
     scheduleLaytimeRecalculate,
+    sofStatus,
+    vesselCallId
+  ]);
+
+  /** Laytime tab opened with no prior run — load fresh totals from the server. */
+  useEffect(() => {
+    if (
+      !autoRecalcEnabled ||
+      sofStatus === "CLOSED" ||
+      !vesselCallId ||
+      eventRows.length === 0 ||
+      layRecalc != null ||
+      layRecalcMut.isPending
+    ) {
+      return;
+    }
+    void enqueueLaytimeRecalculate().catch((e) => toast.error(parseApiErr(e)));
+  }, [
+    autoRecalcEnabled,
+    enqueueLaytimeRecalculate,
+    eventRows.length,
+    layRecalc,
+    layRecalcMut.isPending,
     sofStatus,
     vesselCallId
   ]);

@@ -1,12 +1,20 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
+import { SofEventsCountNotCountSummary } from "@/components/sof/sof-events-count-not-count-summary";
 import { SofEventsLaytimePreview } from "@/components/sof/sof-events-laytime-preview";
 import { SofEventsTable } from "@/components/sof/sof-events-table";
-import { SofEventsTimeSummary } from "@/components/sof/sof-events-time-summary";
+import {
+  SofEventsToolbar,
+  type SofEventsSortOrder
+} from "@/components/sof/sof-events-toolbar";
 import { SofLaytimePersistBar } from "@/components/sof/sof-laytime-persist-bar";
+import {
+  SofWorkspaceVesselHeading,
+  type SofWorkspaceVesselHeadingProps
+} from "@/components/sof/sof-workspace-vessel-heading";
 import { Button } from "@/components/ui/button";
 import type { LaytimeBreakdown, MotherLaytimeDailyLedger } from "@/lib/sof-api";
 import type { SofEventListItem, SofEventTypeOption } from "@/types/vms";
@@ -25,6 +33,7 @@ export type SofAddEventPrefill = {
 
 type SofDetailEventsTabProps = {
   contextPanel: ReactNode;
+  vesselHeading?: SofWorkspaceVesselHeadingProps | null;
   addEventDisabled: boolean;
   onAddEvent: (prefill?: SofAddEventPrefill) => void;
   events: SofEventListItem[];
@@ -34,18 +43,21 @@ type SofDetailEventsTabProps = {
   eventsCsvBasename: string;
   showStatusColumn?: boolean;
   onEventsChanged?: () => void | Promise<void>;
+  onImportCsv?: (file: File) => void | Promise<void>;
+  importBusy?: boolean;
   pagination: SofDetailEventsTabPagination;
   laytimeRecalcPending?: boolean;
   laytimeBreakdown?: LaytimeBreakdown | null;
   laytimeDailyLedger?: MotherLaytimeDailyLedger | null;
   onSaveLaytime?: () => void;
-  /** When true, the "Fill gap" buttons render in a disabled "Preparing…" state. */
   fillGapPreparing?: boolean;
+  compactChrome?: boolean;
 };
 
-/** Shared layout: context panel, add-event row, events table with infinite footer. */
+/** Shared layout: vessel title, toolbar, events table with infinite footer. */
 export function SofDetailEventsTab({
   contextPanel,
+  vesselHeading,
   addEventDisabled,
   onAddEvent,
   events,
@@ -53,34 +65,47 @@ export function SofDetailEventsTab({
   readOnly,
   eventsQueryKey,
   eventsCsvBasename,
-  showStatusColumn,
+  showStatusColumn = false,
   onEventsChanged,
+  onImportCsv,
+  importBusy,
   pagination,
   fillGapPreparing,
   laytimeRecalcPending = false,
   laytimeBreakdown,
   laytimeDailyLedger,
-  onSaveLaytime
+  onSaveLaytime,
+  compactChrome = false
 }: SofDetailEventsTabProps) {
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = pagination;
+  const [sortOrder, setSortOrder] = useState<SofEventsSortOrder>("newest");
+  const exportCsvRef = useRef<() => void>(() => {});
+
+  const handlePrint = useCallback(() => {
+    document.documentElement.classList.add("print-events-mode");
+    window.print();
+    window.setTimeout(() => document.documentElement.classList.remove("print-events-mode"), 500);
+  }, []);
 
   return (
-    <div className="space-y-3">
-      {contextPanel}
-
-      <SofEventsTimeSummary events={events} hasUnloadedHistory={hasNextPage} />
+    <div className={compactChrome ? "space-y-2" : "space-y-3"}>
+      {vesselHeading ? (
+        <SofWorkspaceVesselHeading {...vesselHeading} compact={compactChrome} />
+      ) : null}
+      {compactChrome ? null : contextPanel}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[11px] leading-snug text-muted-foreground">
-          {readOnly ? (
-            <>This SOF is closed or approved — events cannot be edited or deleted.</>
-          ) : (
-            <>
-              <span className="font-medium text-foreground">Count / Not count</span> updates the
-              laytime sheet below automatically. Use the trash icon to remove a row.
-            </>
-          )}
-        </p>
+        <SofEventsToolbar
+          sortOrder={sortOrder}
+          onSortOrderChange={setSortOrder}
+          onExportCsv={() => exportCsvRef.current()}
+          onImportCsv={(file) => void onImportCsv?.(file)}
+          onPrint={handlePrint}
+          eventTypeOptions={eventTypeOptions}
+          exportDisabled={events.length === 0}
+          importDisabled={readOnly || addEventDisabled || !onImportCsv}
+          importBusy={importBusy}
+        />
         <Button
           type="button"
           className="w-full shrink-0 gap-2 sm:w-auto"
@@ -92,14 +117,24 @@ export function SofDetailEventsTab({
         </Button>
       </div>
 
+      <SofEventsCountNotCountSummary
+        events={events}
+        dailyLedger={laytimeDailyLedger}
+        compact={compactChrome}
+      />
+
       <SofEventsTable
         events={events}
         eventTypeOptions={eventTypeOptions}
         readOnly={readOnly}
         eventsQueryKey={eventsQueryKey}
         eventsCsvBasename={eventsCsvBasename}
+        sortOrder={sortOrder}
         showStatusColumn={showStatusColumn}
         onEventsChanged={onEventsChanged}
+        onExportReady={(fn) => {
+          exportCsvRef.current = fn;
+        }}
         onFillGap={addEventDisabled ? undefined : (prefill) => onAddEvent(prefill)}
         fillGapPreparing={fillGapPreparing}
         hasUnloadedHistory={hasNextPage}
@@ -130,6 +165,9 @@ export function SofDetailEventsTab({
           breakdown={laytimeBreakdown}
           dailyLedger={laytimeDailyLedger}
           onSaveLaytime={onSaveLaytime}
+          minimal={compactChrome}
+          saveLabel={compactChrome ? "Save SOF" : "Save laytime"}
+          pendingLabel="Saving…"
         />
       ) : null}
     </div>

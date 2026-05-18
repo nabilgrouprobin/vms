@@ -257,11 +257,17 @@ export type MotherLaytimeTimesheet = {
 export type MotherLaytimeDailyLedgerRow = {
   date: string;
   weekday: string;
+  contactStartsAt: string | null;
+  contactEndsAt: string | null;
   durationHour: number;
   contactHour: number;
   freeTimeHour: number;
   toCountHour: number;
   notToCountHour: number;
+  /** SOF Count-tagged hours this calendar day (wall clock, matches Events gaps). */
+  sofWallToCountHour?: number;
+  /** SOF Not count-tagged hours this calendar day (wall clock). */
+  sofWallNotToCountHour?: number;
   /** @deprecated Use `toCountHour`. */
   workingHour: number;
   /** @deprecated Use `notToCountHour`. */

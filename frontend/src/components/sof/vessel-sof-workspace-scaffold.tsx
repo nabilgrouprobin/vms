@@ -34,10 +34,10 @@ import { parseApiErr } from "@/lib/parse-api-error";
 import { fetchVesselCall, fetchVesselCalls } from "@/lib/vessel-calls-api";
 import {
   applySearchParams,
-  lighterSofNewPath,
   reportsDischargePath,
   VESSEL_SOF_CLEAR_SELECTION_EVENT
 } from "@/lib/workspace-paths";
+import { cn } from "@/lib/utils";
 import type { LighterSofListRow, MotherSofListRow, VesselCallListRow } from "@/types/vms";
 
 const MotherSofDetailView = dynamic(
@@ -435,7 +435,7 @@ function VesselSofWorkspaceScaffoldInner({
     section === "overview"
       ? "Overview"
       : section === "events"
-        ? "Events"
+        ? "SOF"
         : section === "laytime"
           ? "Laytime calculation"
           : "Discharge";
@@ -453,21 +453,32 @@ function VesselSofWorkspaceScaffoldInner({
         : `Choose a mother vessel call or lighter port call. When there is exactly one lighter SOF for that hull, it opens below automatically.`;
 
   const selectedChipTitle = selectedRow
-    ? selectedRow.sofNo
-    : kind === "mother" && motherPeekQ.data
-      ? motherPeekQ.data.sofNo
-      : kind === "lighter" && lighterPeekQ.data
-        ? lighterPeekQ.data.sofNo
-        : "Selected SOF";
+    ? kind === "mother"
+      ? ((selectedRow as unknown as MotherSofListRow).vesselCall?.vessel.name ?? selectedRow.sofNo)
+      : ((selectedRow as unknown as LighterSofListRow).lighterTrip?.lighterVessel.name ??
+          selectedRow.sofNo)
+    : kind === "mother" && motherPeekQ.data?.vesselCall
+      ? motherPeekQ.data.vesselCall.vessel.name
+      : kind === "lighter" && lighterPeekQ.data?.lighterTrip
+        ? lighterPeekQ.data.lighterTrip.lighterVessel.name
+        : "Selected vessel";
 
   const selectedChipDetails = selectedRow
-    ? sofPickerDetails(kind, selectedRow)
-    : kind === "mother" && motherPeekQ.data
-      ? motherPeekQ.data.vesselCall
-        ? `${motherPeekQ.data.vesselCall.vessel.name} · ${motherPeekQ.data.vesselCall.callNo}`
-        : "No vessel call"
+    ? kind === "mother"
+      ? (() => {
+          const row = selectedRow as unknown as MotherSofListRow;
+          return row.vesselCall?.callNo ? `Call ${row.vesselCall.callNo}` : "No call linked";
+        })()
+      : (() => {
+          const row = selectedRow as unknown as LighterSofListRow;
+          return row.lighterTrip
+            ? `Call ${row.lighterTrip.vesselCall?.callNo ?? "—"} · Trip ${row.lighterTrip.tripNo}`
+            : "No trip";
+        })()
+    : kind === "mother" && motherPeekQ.data?.vesselCall
+      ? `Call ${motherPeekQ.data.vesselCall.callNo}`
       : kind === "lighter" && lighterPeekQ.data?.lighterTrip
-        ? `${lighterPeekQ.data.lighterTrip.lighterVessel.name} · Trip ${lighterPeekQ.data.lighterTrip.tripNo} · ${lighterPeekQ.data.lighterTrip.vesselCall?.callNo ?? "—"}`
+        ? `Call ${lighterPeekQ.data.lighterTrip.vesselCall?.callNo ?? "—"} · Trip ${lighterPeekQ.data.lighterTrip.tripNo}`
         : "";
 
   const selectedMotherVesselTitle =
@@ -542,18 +553,7 @@ function VesselSofWorkspaceScaffoldInner({
         queriesEnabled={!hasSofSelection && !hasVesselSelection}
         trailing={
           <Button variant="outline" size="sm" className="w-full lg:w-auto" asChild>
-            <Link
-              href={
-                kind === "mother"
-                  ? "/mother-sof/new"
-                  : lighterSofNewPath({
-                      lighterCallId: lighterCallId || null,
-                      lighterVesselId: legacyLighterHullId || null
-                    })
-              }
-            >
-              New {kind === "mother" ? "mother" : "lighter"} SOF
-            </Link>
+            <Link href="/vessel-calls">New vessel call</Link>
           </Button>
         }
       />
@@ -569,14 +569,7 @@ function VesselSofWorkspaceScaffoldInner({
           placeholder="Search SOF no. or trip…"
           trailing={
             <Button variant="outline" size="sm" className="w-full lg:w-auto" asChild>
-              <Link
-                href={lighterSofNewPath({
-                  lighterCallId: lighterCallId || null,
-                  lighterVesselId: legacyLighterHullId || null
-                })}
-              >
-                New lighter SOF
-              </Link>
+              <Link href="/vessel-calls">New vessel call</Link>
             </Button>
           }
         />
@@ -638,20 +631,38 @@ function VesselSofWorkspaceScaffoldInner({
     !lighterCallMetaQ.isError &&
     !lighterProbeQ.isError;
 
+  const compactMain =
+    hasSofSelection && (section === "events" || section === "laytime");
+
   return (
-    <div className="w-full space-y-6">
-      {section === "laytime" ? (
+    <div className={cn("w-full", compactMain ? "space-y-1" : "space-y-6")}>
+      {!compactMain && section === "laytime" ? (
         <div className="laytime-print-suppress">{topChrome}</div>
-      ) : (
+      ) : !compactMain ? (
         topChrome
-      )}
+      ) : null}
       {sofPickerCard}
 
-      <div className="w-full min-w-0 space-y-4">
-        <div className={section === "laytime" ? "laytime-print-suppress" : undefined}>
-          <h1 className="text-2xl font-bold tracking-tight">{sectionTitle}</h1>
-          <p className="text-sm text-muted-foreground">{helpText}</p>
-        </div>
+      <div
+        className={cn(
+          "w-full min-w-0",
+          hasSofSelection && (section === "events" || section === "laytime")
+            ? "space-y-2"
+            : "space-y-4"
+        )}
+      >
+        {hasSofSelection && (section === "events" || section === "laytime") ? null : (
+          <div className={section === "laytime" ? "laytime-print-suppress pb-0" : undefined}>
+            {section === "laytime" ? (
+              <p className="text-sm text-muted-foreground">Select a vessel call below.</p>
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold tracking-tight">{sectionTitle}</h1>
+                <p className="text-sm text-muted-foreground">{helpText}</p>
+              </>
+            )}
+          </div>
+        )}
 
         {hasSofSelection ? (
           kind === "mother" ? (
@@ -699,7 +710,7 @@ function VesselSofWorkspaceScaffoldInner({
                 {sectionTitle.toLowerCase()}.
               </p>
               <Button asChild variant="secondary">
-                <Link href="/mother-sof/new">Create mother SOF</Link>
+                <Link href="/vessel-calls">New vessel call</Link>
               </Button>
             </CardContent>
           </Card>
@@ -710,14 +721,7 @@ function VesselSofWorkspaceScaffoldInner({
                 No lighter SOF exists for this hull yet. Create one to use {sectionTitle.toLowerCase()}.
               </p>
               <Button asChild variant="secondary">
-                <Link
-                  href={lighterSofNewPath({
-                    lighterCallId: lighterCallId || null,
-                    lighterVesselId: legacyLighterHullId || null
-                  })}
-                >
-                  Create lighter SOF
-                </Link>
+                <Link href="/vessel-calls">New vessel call</Link>
               </Button>
             </CardContent>
           </Card>

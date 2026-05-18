@@ -287,9 +287,174 @@ export function contactHoursInRange(
   return overlapMs(es, ee, win0, win1) / 3_600_000;
 }
 
+/** Contract contact interval for [effStart, effEnd) within the weekly window containing `anchor`. */
+export function contactWindowInRange(
+  effStart: DateTime,
+  effEnd: DateTime,
+  anchor: DateTime,
+  zone: string,
+  w: ContractWeekWindow
+): { from: DateTime; to: DateTime } | null {
+  const z = zone.trim() || "UTC";
+  const es = effStart.setZone(z);
+  const ee = effEnd.setZone(z);
+  const an = anchor.setZone(z);
+  const sun = startOfWeekSunday(an);
+  let win0 = atSundayPlus(sun, w.startJsDow, w.startHm);
+  let win1 = atSundayPlus(sun, w.endJsDow, w.endHm);
+  if (+win1 <= +win0) {
+    win1 = win1.plus({ days: 7 });
+  }
+  const s = +es > +win0 ? es : win0;
+  const e = +ee < +win1 ? ee : win1;
+  if (+e <= +s) return null;
+  return { from: s, to: e };
+}
+
+export function contactWindowOnCalendarDay(
+  dayStart: DateTime,
+  effStart: DateTime,
+  effEnd: DateTime,
+  zone: string,
+  w: ContractWeekWindow
+): { from: DateTime; to: DateTime } | null {
+  if (+effEnd <= +effStart) return null;
+  if (!isJsDayInWorkSpan(jsWeekdayFromDayStart(dayStart), w)) return null;
+  return contactWindowInRange(effStart, effEnd, dayStart, zone, w);
+}
+
+/** NOR tender day contact window; null when `dayStart` is not the NOR local date. */
+export function contactWindowOnNorTenderedCalendarDay(
+  dayStart: DateTime,
+  norTenderedAt: DateTime,
+  effEnd: DateTime,
+  zone: string,
+  w: ContractWeekWindow
+): { from: DateTime; to: DateTime } | null {
+  const z = zone.trim() || "UTC";
+  const nor = norTenderedAt.setZone(z);
+  const day = dayStart.setZone(z).startOf("day");
+  if (+nor.startOf("day") !== +day) return null;
+
+  const noon = day.set({ hour: 12, minute: 0, second: 0, millisecond: 0 });
+  if (+nor >= +noon) return null;
+
+  if (!isJsDayInWorkSpan(jsWeekdayFromDayStart(day), w)) return null;
+
+  const contactFrom = day.set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
+  const end = effEnd.setZone(z);
+  if (+end <= +contactFrom) return null;
+  return contactWindowInRange(contactFrom, end, dayStart, z, w);
+}
+
+function formatContactHm(dt: DateTime, zone: string): string {
+  return dt.setZone(zone.trim() || "UTC").toFormat("HH:mm");
+}
+
+function resolveContactWindowHm(params: {
+  dayStart: DateTime;
+  dayEnd: DateTime;
+  effStart: DateTime;
+  effEnd: DateTime;
+  zone: string;
+  week: ContractWeekWindow;
+  norTendered: DateTime | null;
+  commence: DateTime;
+  alreadyOnDemurrage: boolean;
+  excludedWeekday: boolean;
+  contactHour: number;
+}): { contactStartsAt: string | null; contactEndsAt: string | null } {
+  const z = params.zone.trim() || "UTC";
+  if (params.contactHour <= 1e-9 || params.excludedWeekday) {
+    return { contactStartsAt: null, contactEndsAt: null };
+  }
+  if (params.alreadyOnDemurrage) {
+    return {
+      contactStartsAt: formatContactHm(params.effStart, z),
+      contactEndsAt: formatContactHm(params.effEnd, z)
+    };
+  }
+
+  const contactDayEnd = params.dayEnd;
+  let win: { from: DateTime; to: DateTime } | null = null;
+
+  if (params.norTendered?.isValid) {
+    const norWin = contactWindowOnNorTenderedCalendarDay(
+      params.dayStart,
+      params.norTendered,
+      contactDayEnd,
+      z,
+      params.week
+    );
+    if (norWin) {
+      win = norWin;
+    } else if (
+      contactHoursOnNorTenderedCalendarDay(
+        params.dayStart,
+        params.norTendered,
+        contactDayEnd,
+        z,
+        params.week
+      ) !== null
+    ) {
+      win = null;
+    } else if (
+      params.commence.isValid &&
+      +params.commence.setZone(z).startOf("day") === +params.dayStart
+    ) {
+      win = contactWindowOnCalendarDay(
+        params.dayStart,
+        params.commence.setZone(z),
+        contactDayEnd,
+        z,
+        params.week
+      );
+    } else {
+      win = contactWindowOnCalendarDay(
+        params.dayStart,
+        params.dayStart,
+        contactDayEnd,
+        z,
+        params.week
+      );
+    }
+  } else if (
+    params.commence.isValid &&
+    +params.commence.setZone(z).startOf("day") === +params.dayStart
+  ) {
+    win = contactWindowOnCalendarDay(
+      params.dayStart,
+      params.commence.setZone(z),
+      contactDayEnd,
+      z,
+      params.week
+    );
+  } else {
+    win = contactWindowOnCalendarDay(
+      params.dayStart,
+      params.dayStart,
+      contactDayEnd,
+      z,
+      params.week
+    );
+  }
+
+  if (!win) {
+    return { contactStartsAt: null, contactEndsAt: null };
+  }
+  return {
+    contactStartsAt: formatContactHm(win.from, z),
+    contactEndsAt: formatContactHm(win.to, z)
+  };
+}
+
 export type MotherLaytimeDailyLedgerRow = {
   date: string;
   weekday: string;
+  /** Local HH:mm when contract contact starts this day (laytime zone). */
+  contactStartsAt: string | null;
+  /** Local HH:mm when contract contact ends this day (laytime zone). */
+  contactEndsAt: string | null;
   /** Wall-clock hours in the laytime period this calendar day (24h mid-range; partial NOR/finish days). */
   durationHour: number;
   contactHour: number;
@@ -299,6 +464,10 @@ export type MotherLaytimeDailyLedgerRow = {
   toCountHour: number;
   /** SOF hours in contact window tagged not to count; with toCount sums to contact. */
   notToCountHour: number;
+  /** SOF Count-tagged hours on this calendar day (wall clock, incl. outside contact). */
+  sofWallToCountHour: number;
+  /** SOF Not count-tagged hours on this calendar day (wall clock, incl. outside contact). */
+  sofWallNotToCountHour: number;
   /** @deprecated Use `toCountHour`. Kept for API compatibility. */
   workingHour: number;
   /** @deprecated Use `notToCountHour`. Kept for API compatibility. */
@@ -384,10 +553,49 @@ export function splitSegmentUsedHoursByCalendarDay(
 const MAX_LEDGER_DAYS = 400;
 
 /**
+ * SOF segment hours on one calendar day by Count / Not count tag (wall clock, any time of day).
+ * Used for alignment with the Events page totals and to explain off-contact not-count time.
+ */
+export function laytimeWallCountNotToCountOnCalendarDay(
+  segments: LaytimeSegment[],
+  dayStart: DateTime,
+  dayEnd: DateTime,
+  effStart: DateTime,
+  effEnd: DateTime,
+  zone: string
+): { wallToCountHour: number; wallNotToCountHour: number } {
+  const z = zone.trim() || "UTC";
+  let wallToCount = 0;
+  let wallNotToCount = 0;
+
+  for (const seg of segments) {
+    const wall = seg.elapsedWallHours;
+    if (wall <= 0 || seg.countingHours <= 0) continue;
+    const t0 = DateTime.fromJSDate(seg.periodFrom, { zone: z });
+    const t1 = DateTime.fromJSDate(seg.periodTo, { zone: z });
+    if (!t0.isValid || !t1.isValid || +t1 <= +t0) continue;
+
+    const segStart = +t0 > +effStart ? t0 : effStart;
+    const segEnd = +t1 < +effEnd ? t1 : effEnd;
+    if (+segEnd <= +segStart) continue;
+
+    const segOnDayH = (+segEnd - +segStart) / 3_600_000;
+    if (segOnDayH <= 1e-9) continue;
+
+    if (seg.countsAsLaytime) {
+      wallToCount += segOnDayH;
+    } else {
+      wallNotToCount += segOnDayH;
+    }
+  }
+
+  return { wallToCountHour: round2(wallToCount), wallNotToCountHour: round2(wallNotToCount) };
+}
+
+/**
  * Split SOF segment hours on one calendar day into contact-window to-count vs not-to-count.
- * Unfilled contact after segment credits is idle-in-contact: not-to-count when any segment
- * that day is tagged not-to-count; otherwise it stays to-count (e.g. CP counting fraction
- * reduced credited hours but events are still marked Count).
+ * Unfilled contact after segment credits defaults to Count unless the day is only tagged
+ * Not count in the contact window.
  */
 export function laytimeToCountNotToCountOnDay(
   segments: LaytimeSegment[],
@@ -404,6 +612,14 @@ export function laytimeToCountNotToCountOnDay(
     return { toCountHour: 0, notToCountHour: 0 };
   }
   const z = zone.trim() || "UTC";
+  const wallSplit = laytimeWallCountNotToCountOnCalendarDay(
+    segments,
+    dayStart,
+    dayEnd,
+    effStart,
+    effEnd,
+    zone
+  );
   let toCount = 0;
   let notToCount = 0;
   let anyCountCredit = false;
@@ -442,11 +658,18 @@ export function laytimeToCountNotToCountOnDay(
 
   const sum = toCount + notToCount;
   if (sum < contactHours - 1e-9) {
-    const remainder = contactHours - sum;
-    if (!anyNotCountCredit && anyCountCredit) {
-      toCount += remainder;
-    } else {
-      notToCount += remainder;
+    let remainder = contactHours - sum;
+    // Credit SOF not-count time on this calendar day (e.g. 00:00–02:00 before contact opens).
+    const wallNotCountRoom = Math.max(0, wallSplit.wallNotToCountHour - notToCount);
+    const fromWall = Math.min(remainder, wallNotCountRoom);
+    notToCount += fromWall;
+    remainder -= fromWall;
+    if (remainder > 1e-9) {
+      if (anyNotCountCredit && !anyCountCredit) {
+        notToCount += remainder;
+      } else {
+        toCount += remainder;
+      }
     }
   } else if (sum > contactHours + 1e-9 && sum > 1e-9) {
     const scale = contactHours / sum;
@@ -658,6 +881,15 @@ export function buildMotherLaytimeDailyLedger(params: {
 
     const freeTime = Math.max(0, duration - contact);
 
+    const { wallToCountHour, wallNotToCountHour } = laytimeWallCountNotToCountOnCalendarDay(
+      params.segments,
+      dayStart,
+      dayEnd,
+      effStart,
+      effEnd,
+      zone
+    );
+
     const { toCountHour, notToCountHour } = laytimeToCountNotToCountOnDay(
       params.segments,
       dayStart,
@@ -693,14 +925,34 @@ export function buildMotherLaytimeDailyLedger(params: {
       prevCumToCount < free - 1e-9 &&
       cumToCount >= free - 1e-9;
 
+    const excludedWeekday =
+      !alreadyOnDemurrage && excludedSet.has(jsWeekdayFromDayStart(dayStart));
+    const { contactStartsAt, contactEndsAt } = resolveContactWindowHm({
+      dayStart,
+      dayEnd,
+      effStart,
+      effEnd,
+      zone,
+      week: params.week,
+      norTendered: norTendered?.isValid ? norTendered : null,
+      commence,
+      alreadyOnDemurrage,
+      excludedWeekday,
+      contactHour: contact
+    });
+
     rows.push({
       date: k,
       weekday: dayStart.setLocale("en").toFormat("cccc"),
+      contactStartsAt,
+      contactEndsAt,
       durationHour: round2(duration),
       contactHour: round2(contact),
       freeTimeHour: round2(freeTime),
       toCountHour,
       notToCountHour,
+      sofWallToCountHour: wallToCountHour,
+      sofWallNotToCountHour: wallNotToCountHour,
       workingHour: toCountHour,
       idleHour: notToCountHour,
       cumulativeTotalUsedHour: round2(cumToCount),

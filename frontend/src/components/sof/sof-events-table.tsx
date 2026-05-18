@@ -1,18 +1,19 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SofLaytimeCountToggle } from "@/components/sof/sof-laytime-count-toggle";
 import { SofLocalDatetimeInputs } from "@/components/sof/sof-local-datetime-inputs";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { formatDt } from "@/lib/format";
+import { formatSofUserError } from "@/lib/format-sof-user-error";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { toast } from "@/lib/toast";
 import {
@@ -47,20 +48,6 @@ function escapeCsvCell(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
-}
-
-function EventsTableLegend() {
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/15 px-2 py-1 text-[10px] text-muted-foreground">
-      <span className="font-semibold text-foreground">Events</span>
-      <span>
-        Tag each period in contact time as{" "}
-        <span className="font-medium text-emerald-700 dark:text-emerald-400">Count</span> or{" "}
-        <span className="font-medium text-foreground">Not count</span> on the laytime daily sheet.
-        Default is Count.
-      </span>
-    </div>
-  );
 }
 
 function EventTh({
@@ -129,15 +116,18 @@ type SofEventsTableProps = {
   eventTypeOptions: SofEventTypeOption[];
   readOnly: boolean;
   eventsQueryKey: readonly unknown[];
-  listNote?: string;
   footer?: ReactNode;
-  /** If set, shows Export CSV when there is at least one event (safe filename fragment). */
+  sortOrder?: "newest" | "oldest";
+  /** If set, enables CSV export via `onExportCsv` (safe filename fragment). */
   eventsCsvBasename?: string;
+  /** Parent toolbar calls the registered export function. */
+  onExportReady?: (exportCsv: () => void) => void;
   /** e.g. invalidate SOF detail after event CRUD */
   /** Called after event CRUD; await recalc when laytime should refresh. */
   onEventsChanged?: () => void | Promise<void>;
   /** When false, hides the Category column (Hold vs Normal from event type). Default true. */
   showStatusColumn?: boolean;
+  printAreaId?: string;
   /** To count / not to count laytime toggle per event. Default true. */
   showLaytimeCountColumn?: boolean;
   /**
@@ -166,11 +156,13 @@ export function SofEventsTable({
   eventTypeOptions,
   readOnly,
   eventsQueryKey,
-  listNote = "Loaded rows sorted newest → oldest. Load more to extend history.",
   footer,
+  sortOrder = "newest",
   eventsCsvBasename,
+  onExportReady,
   onEventsChanged,
-  showStatusColumn = true,
+  showStatusColumn = false,
+  printAreaId = "sof-events-print",
   showLaytimeCountColumn = true,
   onFillGap,
   fillGapPreparing = false,
@@ -242,8 +234,10 @@ export function SofEventsTable({
     return out;
   }, [ownWindowsAsc, hasUnloadedHistory]);
 
-  /** Newest first in the UI. */
-  const displayDesc = useMemo(() => [...displayAsc].reverse(), [displayAsc]);
+  const displayOrdered = useMemo(
+    () => (sortOrder === "newest" ? [...displayAsc].reverse() : displayAsc),
+    [displayAsc, sortOrder]
+  );
 
   const openEdit = (ev: SofEventListItem) => {
     setEdit(ev);
@@ -265,11 +259,20 @@ export function SofEventsTable({
       eventId: string;
       countsAsLaytime: boolean;
     }) => updateSofEvent(eventId, { countsAsLaytime }),
-    onSuccess: async () => {
+    onSuccess: async (_data, { countsAsLaytime }) => {
       await qc.refetchQueries({ queryKey: [...eventsQueryKey] });
       await onEventsChanged?.();
+      toast.success(
+        countsAsLaytime
+          ? "This event now counts toward laytime on the daily sheet."
+          : "This event is excluded from laytime count.",
+        {
+          title: countsAsLaytime ? "Marked as count" : "Marked as not count",
+          durationMs: 3500
+        }
+      );
     },
-    onError: (e) => toast.error(parseApiErr(e))
+    onError: (e) => toast.error(formatSofUserError(e))
   });
 
   const updMut = useMutation({
@@ -280,17 +283,20 @@ export function SofEventsTable({
       await qc.refetchQueries({ queryKey: [...eventsQueryKey] });
       await onEventsChanged?.();
     },
-    onError: (e) => setEditErr(parseApiErr(e))
+    onError: (e) => {
+      const msg = formatSofUserError(e);
+      setEditErr(msg);
+      toast.error(msg);
+    }
   });
 
-  const downloadCsv = () => {
-    if (!eventsCsvBasename || displayAsc.length === 0) return;
+  const downloadCsv = useCallback(() => {
+    if (!eventsCsvBasename || sortedAsc.length === 0) return;
     const header = [
       "Event starts at",
       "Event ends at",
       "Length",
       "Type",
-      "Category",
       "Laytime count",
       "Created by",
       "Remarks",
@@ -320,7 +326,6 @@ export function SofEventsTable({
         formatDt(row.toIso),
         row.durationLabel,
         rowTypeLabel(row.ev),
-        rowCategoryFromEventType(row.ev).label,
         row.ev.countsAsLaytime !== false ? "Count" : "Not count",
         row.ev.createdByUser.fullName,
         row.ev.remarks ?? "",
@@ -340,7 +345,7 @@ export function SofEventsTable({
     a.download = `${eventsCsvBasename.replace(/[^a-zA-Z0-9._-]+/g, "_")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  };
+  }, [eventsCsvBasename, sortedAsc, displayAsc]);
 
   /**
    * Hard-delete an SOF event. The mutation also forces a refetch of the
@@ -356,7 +361,7 @@ export function SofEventsTable({
       await onEventsChanged?.();
       toast.success("Event deleted");
     },
-    onError: (e) => toast.error(parseApiErr(e))
+    onError: (e) => toast.error(formatSofUserError(e))
   });
 
   const editingType = useMemo(
@@ -365,45 +370,23 @@ export function SofEventsTable({
   );
   const editingIsHold = editingType?.category === "HOLD_DELAY";
 
+  useEffect(() => {
+    if (onExportReady) onExportReady(downloadCsv);
+  }, [onExportReady, downloadCsv]);
+
   return (
     <>
-      <Card className="shadow-sm">
-        <CardHeader className="flex flex-col gap-2 space-y-0 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-0.5">
-            <CardTitle className="text-sm font-semibold">Events</CardTitle>
-            <CardDescription className="text-[10px] leading-snug">
-              {listNote}
-              {hasUnloadedHistory ? (
-                <>
-                  <br />
-                  <span className="text-amber-600 dark:text-amber-400">
-                    Older events are not yet loaded — use “More events” below before
-                    judging whether a period is missing. Gap markers are hidden until the
-                    full timeline is loaded to avoid false positives.
-                  </span>
-                </>
-              ) : null}
-            </CardDescription>
-          </div>
-          {eventsCsvBasename && sortedAsc.length > 0 ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-[11px] w-full shrink-0 sm:w-auto"
-              onClick={downloadCsv}
-            >
-              <Download className="size-3.5" aria-hidden />
-              Export CSV
-            </Button>
+      <Card className="shadow-sm" id={printAreaId}>
+        <CardContent className="space-y-2 px-3 py-3">
+          {hasUnloadedHistory ? (
+            <p className="text-[10px] text-amber-700 dark:text-amber-400">
+              Load more events before filling gaps — older rows may not be loaded yet.
+            </p>
           ) : null}
-        </CardHeader>
-        <CardContent className="space-y-2 px-3 pb-3 pt-0">
-          {displayDesc.length === 0 ? (
+          {displayOrdered.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">No events yet.</p>
           ) : (
             <div className="space-y-2">
-              {showLaytimeCountColumn ? <EventsTableLegend /> : null}
               <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
               <table
                 className={cn(
@@ -435,7 +418,7 @@ export function SofEventsTable({
                   </tr>
                 </thead>
                 <tbody>
-                  {displayDesc.map((row, rowIdx) => {
+                  {displayOrdered.map((row, rowIdx) => {
                     const rowBase =
                       "border-b border-border/70 transition-colors hover:bg-muted/25";
                     const cell = "px-2 py-1 align-middle whitespace-nowrap";
@@ -526,6 +509,7 @@ export function SofEventsTable({
                             <div className="flex justify-center">
                               <SofLaytimeCountToggle
                                 variant="table"
+                                confirmChange
                                 disabled={readOnly || countMut.isPending}
                                 value={ev.countsAsLaytime !== false}
                                 onChange={(countsAsLaytime) =>
@@ -545,8 +529,10 @@ export function SofEventsTable({
                           {ev.createdByUser.fullName}
                         </td>
                         <td
-                          className={cn(cell, "max-w-[10rem] truncate text-[10px] text-foreground")}
-                          title={ev.remarks?.trim() ?? undefined}
+                          className={cn(
+                            cell,
+                            "max-w-md whitespace-normal break-words text-[10px] leading-snug text-foreground align-top"
+                          )}
                         >
                           {ev.remarks?.trim() ? ev.remarks : "—"}
                         </td>
@@ -621,10 +607,6 @@ export function SofEventsTable({
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-muted-foreground">
-                  Category follows the event type: choose a Hold type to flag this row as a hold, or
-                  a normal type otherwise.
-                </p>
               </div>
               <div className="space-y-2">
                 <Label>Event ends at</Label>

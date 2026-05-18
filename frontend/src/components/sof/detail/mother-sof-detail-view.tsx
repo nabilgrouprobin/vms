@@ -11,8 +11,12 @@ import {
   type SofAddEventCurrentUser,
   type SofAddEventFields
 } from "@/components/sof/detail/sof-add-event-sheet";
+import { MotherLaytimeSetupAside } from "@/components/sof/detail/mother-laytime-setup-aside";
 import { SofDetailHeader } from "@/components/sof/detail/sof-detail-header";
 import { SofDetailEventsTab } from "@/components/sof/detail/sof-detail-events-tab";
+import { LaytimeResultsActions } from "@/components/sof/laytime-results-actions";
+import { SofSortOrderToggle } from "@/components/sof/sof-events-toolbar";
+import { SofWorkspaceVesselHeading } from "@/components/sof/sof-workspace-vessel-heading";
 import { SofDetailLaytimeSheetsStrip } from "@/components/sof/detail/sof-detail-laytime-sheets-strip";
 import { SofLaytimePersistBar } from "@/components/sof/sof-laytime-persist-bar";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
@@ -63,6 +67,11 @@ import {
   LAYTIME_TIMEZONE_SUGGESTIONS
 } from "@/lib/timezone-gmt";
 import { fetchSofEventTypeOptions } from "@/lib/master-data-api";
+import { formatSofUserError } from "@/lib/format-sof-user-error";
+import {
+  parseSofEventsCsv,
+  partitionSofEventRowsByKnownTypes
+} from "@/lib/sof-events-csv-import";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -241,6 +250,8 @@ export function MotherSofDetailView({
    * reflects the freshest server state.
    */
   const [fillGapPreparing, setFillGapPreparing] = useState(false);
+  const [importEvBusy, setImportEvBusy] = useState(false);
+  const [laytimeDaySort, setLaytimeDaySort] = useState<"newest" | "oldest">("newest");
 
   const profile = useUserProfile();
   const currentUser = useMemo<SofAddEventCurrentUser | null>(
@@ -395,8 +406,9 @@ export function MotherSofDetailView({
       scheduleLaytimeRecalculate();
     },
     onError: (e) => {
-      const msg = parseApiErr(e);
+      const msg = formatSofUserError(e);
       setEvErr(msg);
+      toast.error(msg);
       // When the backend rejects with an overlap error the cached events
       // list is almost certainly stale (an event was created somewhere we
       // didn't see). Force a refresh so the conflicting row immediately
@@ -407,6 +419,81 @@ export function MotherSofDetailView({
       }
     }
   });
+
+  const importEventsCsv = useCallback(
+    async (file: File) => {
+      if (sof?.status === "CLOSED") {
+        toast.error("This SOF is closed — events cannot be imported.");
+        return;
+      }
+      if (!currentUser?.id) {
+        toast.error("You must be signed in to import events.");
+        return;
+      }
+      const types = eventTypesQ.data ?? [];
+      if (types.length === 0) {
+        toast.error("No event types loaded. Try again in a moment.");
+        return;
+      }
+      setImportEvBusy(true);
+      try {
+        const text = await file.text();
+        const { rows, errors: parseErrors } = parseSofEventsCsv(text);
+        if (rows.length === 0) {
+          toast.error(parseErrors[0] ?? "No valid rows in CSV.");
+          return;
+        }
+        const { matched, unknownTypeNames } = partitionSofEventRowsByKnownTypes(rows, types);
+        let ok = 0;
+        const rowErrors: string[] = [...parseErrors];
+        if (unknownTypeNames.length > 0) {
+          rowErrors.push(
+            `Unknown event type(s) — row(s) skipped: ${unknownTypeNames.join(", ")}. Use exact names from Format template or Master data → SOF event types.`
+          );
+        }
+        for (const { row, type } of matched) {
+          try {
+            await createMotherSofEvent(id, {
+              eventTypeId: type.id,
+              eventTime: row.eventEndsAt,
+              ...(row.durationMinutes != null
+                ? { durationMinutes: row.durationMinutes, durationHours: null }
+                : {}),
+              remarks: row.remarks,
+              isHold: type.category === "HOLD_DELAY",
+              countsAsLaytime: row.countsAsLaytime
+            });
+            ok++;
+          } catch (e) {
+            rowErrors.push(`${row.typeName}: ${formatSofUserError(e)}`);
+          }
+        }
+        void qc.invalidateQueries({ queryKey: ["mother-sof-events", id] });
+        void qc.invalidateQueries({ queryKey: ["mother-sof", id] });
+        scheduleLaytimeRecalculate();
+        if (ok > 0) {
+          toast.success(`Imported ${ok} event${ok === 1 ? "" : "s"}.`);
+        }
+        if (rowErrors.length > 0) {
+          toast.error(
+            rowErrors.length > 3
+              ? `${rowErrors.slice(0, 3).join(" ")} (+${rowErrors.length - 3} more)`
+              : rowErrors.join(" ")
+          );
+        }
+      } finally {
+        setImportEvBusy(false);
+      }
+    },
+    [
+      sof?.status,
+      currentUser?.id,
+      eventTypesQ.data,
+      id,
+      qc,
+      scheduleLaytimeRecalculate
+    ]
+  );
 
   const addEventFields = useMemo<SofAddEventFields>(
     () => ({
@@ -526,6 +613,15 @@ export function MotherSofDetailView({
     scheduleLaytimeRecalculate
   ]);
 
+  const displayDailyLedger = useMemo(() => {
+    if (!layRecalc?.dailyLedger) return null;
+    const rows =
+      laytimeDaySort === "newest"
+        ? [...layRecalc.dailyLedger.rows].reverse()
+        : layRecalc.dailyLedger.rows;
+    return { ...layRecalc.dailyLedger, rows };
+  }, [layRecalc?.dailyLedger, laytimeDaySort]);
+
   if (sofQ.isLoading) {
     return (
       <div className="space-y-4">
@@ -584,8 +680,57 @@ export function MotherSofDetailView({
     />
   );
 
+  const showCompactWorkspaceChrome =
+    Boolean(hideWorkspaceChrome) &&
+    (workspaceSection === "events" || workspaceSection === "laytime");
+
+  const laytimeSetupAside =
+    sof.vesselCall?.id != null ? (
+      <MotherLaytimeSetupAside
+        className={cn(
+          "laytime-print-suppress",
+          laytimePrintSuppressChrome &&
+            "xl:rounded-lg xl:border xl:border-border xl:bg-muted/15 xl:p-2"
+        )}
+        sofId={id}
+        readOnly={sof.status === "CLOSED"}
+        vesselCall={sof.vesselCall}
+        sofUpdatedAt={sof.updatedAt}
+        laytimePartialCargoMt={sof.laytimePartialCargoMt}
+        laytimeHolidays={sof.laytimeHolidays}
+        cargo={laytimeCargoAllowance}
+        week={laytimeWeekWindow}
+        layTz={layTz}
+        setLayTz={setLayTz}
+        layTzInputId={workspaceSection === "laytime" ? "lay-tz-ws" : "lay-tz-tab"}
+        layTzDatalistId={layTzDatalistId}
+        layTzPreviewIana={layTzPreviewIana}
+        layTzGmtPreview={layTzGmtPreview}
+        patchVcLayTzPending={patchVcLayTzMut.isPending}
+        onSaveLayTz={() => patchVcLayTzMut.mutate()}
+        qc={qc}
+        onNorSaved={() => {
+          if (sof.status !== "CLOSED") void runLaytimeRecalculate();
+        }}
+      />
+    ) : null;
+
+  const vesselHeadingProps = sof.vesselCall
+    ? {
+        vesselName: sof.vesselCall.vessel.name,
+        callNo: sof.vesselCall.callNo,
+        status: sof.status,
+        kind: "mother" as const,
+        changeHref: listHref,
+        onNavigateClick: () => {
+          window.dispatchEvent(new Event(VESSEL_SOF_CLEAR_SELECTION_EVENT));
+        }
+      }
+    : null;
+
   const eventsTab = (
     <SofDetailEventsTab
+      vesselHeading={vesselHeadingProps}
       contextPanel={
         <MotherVesselEventsContextPanel
           vesselCall={sof.vesselCall}
@@ -602,7 +747,14 @@ export function MotherSofDetailView({
       eventTypeOptions={eventTypesQ.data ?? []}
       readOnly={sof.status === "CLOSED"}
       eventsQueryKey={["mother-sof-events", id]}
-      eventsCsvBasename={`${sof.sofNo}-events`}
+      eventsCsvBasename={
+        sof.vesselCall
+          ? `${sof.vesselCall.vessel.name}-${sof.vesselCall.callNo}-events`
+          : "sof-events"
+      }
+      showStatusColumn={false}
+      onImportCsv={importEventsCsv}
+      importBusy={importEvBusy}
       onEventsChanged={() => scheduleLaytimeRecalculate()}
       laytimeRecalcPending={layRecalcPending}
       laytimeBreakdown={layRecalc?.breakdown}
@@ -614,13 +766,14 @@ export function MotherSofDetailView({
         fetchNextPage: () => eventsQ.fetchNextPage()
       }}
       fillGapPreparing={fillGapPreparing}
+      compactChrome={showCompactWorkspaceChrome && workspaceSection === "events"}
     />
   );
 
   const laytimeSheetsStrip = (
     <SofDetailLaytimeSheetsStrip
-      heading="Laytime worksheet"
-      idleHint="Updates automatically when you change events or Count / Not count."
+      heading="Laytime"
+      compact={showCompactWorkspaceChrome}
       breakdown={layRecalc?.breakdown}
       recalculateDisabled={layRecalcPending || sof.status === "CLOSED"}
       recalculatePending={layRecalcPending}
@@ -633,7 +786,7 @@ export function MotherSofDetailView({
       <Skeleton className="h-48 w-full rounded-xl" />
     ) : layRecalc ? (
       <MotherLaytimeTimesheetTable
-        dailyLedger={layRecalc.dailyLedger}
+        dailyLedger={displayDailyLedger ?? layRecalc.dailyLedger}
         timesheet={layRecalc.timesheet}
         breakdown={layRecalc.breakdown}
         chronology={layRecalc.chronology}
@@ -653,13 +806,16 @@ export function MotherSofDetailView({
       breakdown={layRecalc?.breakdown}
       dailyLedger={layRecalc?.dailyLedger}
       onSaveLaytime={() => void saveLaytimeToDatabase()}
+      minimal={showCompactWorkspaceChrome}
+      saveLabel={showCompactWorkspaceChrome ? "Save" : "Save laytime"}
+      pendingLabel="Saving…"
     />
   ) : null;
 
   if (workspaceSection) {
     return (
-      <div className="space-y-6">
-        {header}
+      <div className={showCompactWorkspaceChrome ? "space-y-2" : "space-y-6"}>
+        {showCompactWorkspaceChrome ? null : header}
 
         {workspaceSection === "overview" ? (
           <div className="space-y-6">
@@ -754,7 +910,10 @@ export function MotherSofDetailView({
         {workspaceSection === "events" ? eventsTab : null}
 
         {workspaceSection === "laytime" ? (
-          <div className="space-y-3">
+          <div className="space-y-1">
+            {vesselHeadingProps ? (
+              <SofWorkspaceVesselHeading {...vesselHeadingProps} compact />
+            ) : null}
             {!sof.vesselCall?.id ? (
               <Card>
                 <CardContent className="py-4 text-sm text-muted-foreground">
@@ -762,15 +921,20 @@ export function MotherSofDetailView({
                 </CardContent>
               </Card>
             ) : (
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-start">
                 <div className="order-1 min-w-0 flex-1 xl:order-2">
-                  <div className="laytime-print-bundle space-y-2">
-                    {laytimeSheetsStrip}
+                  <div className="laytime-print-bundle space-y-1.5">
                     <LaytimeCalculationResultsPanel
                       sofNo={sof.sofNo}
                       breakdown={layRecalc?.breakdown ?? null}
                       timesheet={layRecalc?.timesheet ?? null}
                       portStatement={motherLaytimePortStatement ?? null}
+                      compact
+                      recalculateDisabled={layRecalcPending || sof.status === "CLOSED"}
+                      recalculatePending={layRecalcPending}
+                      onRecalculate={() =>
+                        void runLaytimeRecalculate().catch((e) => toast.error(parseApiErr(e)))
+                      }
                     />
                     {laytimeSnapshot ? (
                       <Collapsible defaultOpen={false}>
@@ -797,160 +961,23 @@ export function MotherSofDetailView({
                       </CollapsibleContent>
                     </Collapsible>
                   ) : null}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <SofSortOrderToggle
+                      sortOrder={laytimeDaySort}
+                      onSortOrderChange={setLaytimeDaySort}
+                    />
+                    <LaytimeResultsActions
+                      sofNo={sof.sofNo}
+                      breakdown={layRecalc?.breakdown ?? null}
+                      timesheet={layRecalc?.timesheet ?? null}
+                      portStatement={motherLaytimePortStatement ?? null}
+                      showCopySummary={false}
+                    />
+                  </div>
                   {laytimeDailySheetBlock}
                   </div>
                 </div>
-                <aside
-                  className={cn(
-                    "order-2 space-y-2 xl:order-1 xl:w-[min(16rem,24vw)] xl:shrink-0 xl:rounded-lg xl:border xl:border-border xl:bg-muted/15 xl:p-2 xl:sticky xl:top-3 xl:self-start xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto",
-                    laytimePrintSuppressChrome && "laytime-print-suppress"
-                  )}
-                >
-                  <SofLaytimeSetupSidebarCard
-                    cargo={laytimeCargoAllowance}
-                    week={laytimeWeekWindow}
-                  />
-                  <Collapsible defaultOpen={false} className="laytime-print-suppress">
-                    <CollapsibleTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-full justify-between rounded-md border border-border/60 bg-card/50 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                      >
-                        <span>Contract, NOR &amp; holidays</span>
-                        <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="space-y-2 pt-2">
-                      {sof.vesselCall.importContract?.id ? (
-                        <Card className="shadow-sm xl:shadow-none">
-                          <CardHeader className="space-y-1 px-3 py-2 pb-0">
-                            <CardTitle className="text-sm font-semibold">Import contract</CardTitle>
-                            <CardDescription className="text-[10px] leading-snug line-clamp-2">
-                              Demurrage, dispatch, and other CP terms.
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent className="px-3 pb-3 pt-2">
-                            <ImportContractLaytimeForm
-                              contractId={sof.vesselCall.importContract.id}
-                              embedded
-                              embeddedCompact
-                              showCargoFields={false}
-                              showWeekFields={false}
-                              readOnly={sof.status === "CLOSED"}
-                              vesselCallId={sof.vesselCall.id}
-                              vesselCallApproxTotalWeightTon={sof.vesselCall.approxTotalWeightTon}
-                              onSaved={() =>
-                                void qc.invalidateQueries({ queryKey: ["mother-sof", id] })
-                              }
-                              onUnlinked={() =>
-                                void qc.invalidateQueries({ queryKey: ["mother-sof", id] })
-                              }
-                            />
-                          </CardContent>
-                        </Card>
-                      ) : (
-                        <VesselCallImportContractLinkPanel
-                          vesselCallId={sof.vesselCall.id}
-                          readOnly={sof.status === "CLOSED"}
-                          onLinked={() => void qc.invalidateQueries({ queryKey: ["mother-sof", id] })}
-                        />
-                      )}
-                      <SofEventsVesselLaytimeSetupCard
-                        vesselCall={sof.vesselCall}
-                        readOnly={sof.status === "CLOSED"}
-                        invalidateQueryKeys={[["mother-sof", id]]}
-                        showContractLink={false}
-                        showWeek={false}
-                        showNor
-                        onNorSaved={() => {
-                          if (sof.status !== "CLOSED") void runLaytimeRecalculate();
-                        }}
-                      />
-                      <SofLaytimeStatementParamsCard
-                        readOnly={sof.status === "CLOSED"}
-                        serverSyncToken={sof.updatedAt}
-                        laytimePartialCargoMt={sof.laytimePartialCargoMt}
-                        laytimeHolidays={sof.laytimeHolidays}
-                        patchSof={(body) => updateMotherSof(id, body)}
-                        invalidateQueryKeys={[["mother-sof", id]]}
-                        showPartialCargo={false}
-                      />
-                      <Card className="shadow-sm xl:shadow-none">
-                        <CardHeader className="space-y-0 px-3 py-2 pb-0">
-                          <CardTitle className="text-sm font-semibold">Calendar zone</CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex flex-col gap-2 px-3 pb-3 pt-2 sm:flex-row sm:items-end">
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <Label htmlFor="lay-tz-ws" className="text-xs">
-                              IANA time zone (GMT shown for reference)
-                            </Label>
-                            <Input
-                              id="lay-tz-ws"
-                              className="h-8 font-mono text-sm"
-                              list={layTzDatalistId}
-                              value={layTz}
-                              onChange={(e) => setLayTz(e.target.value)}
-                              placeholder={DEFAULT_LAYTIME_IANA_ZONE}
-                              autoComplete="off"
-                              disabled={sof.status === "CLOSED"}
-                            />
-                            <datalist id={layTzDatalistId}>
-                              {LAYTIME_TIMEZONE_SUGGESTIONS.map((z) => (
-                                <option key={z} value={z}>
-                                  {formatIanaZoneSuggestionLabel(z)}
-                                </option>
-                              ))}
-                            </datalist>
-                            {layTzGmtPreview ? (
-                              <p className="text-[10px] leading-snug text-muted-foreground">
-                                {layTz.trim() ? (
-                                  <>
-                                    <span className="font-mono text-foreground">
-                                      {layTzPreviewIana}
-                                    </span>{" "}
-                                    —{" "}
-                                    <span className="font-medium text-foreground">
-                                      {layTzGmtPreview}
-                                    </span>{" "}
-                                    now (DST can shift this).
-                                  </>
-                                ) : (
-                                  <>
-                                    Blank uses backend default{" "}
-                                    <span className="font-mono text-foreground">
-                                      {DEFAULT_LAYTIME_IANA_ZONE}
-                                    </span>{" "}
-                                    —{" "}
-                                    <span className="font-medium text-foreground">
-                                      {layTzGmtPreview}
-                                    </span>{" "}
-                                    now.
-                                  </>
-                                )}
-                              </p>
-                            ) : layTz.trim() ? (
-                              <p className="text-[10px] text-destructive">
-                                Unknown zone; check the IANA spelling.
-                              </p>
-                            ) : null}
-                          </div>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="shrink-0"
-                            disabled={sof.status === "CLOSED" || patchVcLayTzMut.isPending}
-                            onClick={() => patchVcLayTzMut.mutate()}
-                          >
-                            Save
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </aside>
+                {laytimeSetupAside}
               </div>
             )}
             {laytimePersistBar}
@@ -1109,151 +1136,7 @@ export function MotherSofDetailView({
               </div>
 
               {/* Setup: below sheets on mobile; narrow left rail on xl */}
-              <aside
-                className={cn(
-                  "order-2 space-y-2 xl:order-1 xl:w-[min(16rem,24vw)] xl:shrink-0 xl:rounded-lg xl:border xl:border-border xl:bg-muted/15 xl:p-2 xl:sticky xl:top-3 xl:self-start xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto",
-                  laytimePrintSuppressChrome && "laytime-print-suppress"
-                )}
-              >
-                <SofLaytimeSetupSidebarCard
-                  cargo={laytimeCargoAllowance}
-                  week={laytimeWeekWindow}
-                />
-                <Collapsible defaultOpen={false} className="laytime-print-suppress">
-                  <CollapsibleTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-full justify-between rounded-md border border-border/60 bg-card/50 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                    >
-                      <span>Contract, NOR &amp; holidays</span>
-                      <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="space-y-2 pt-2">
-                    {sof.vesselCall.importContract?.id ? (
-                      <Card className="shadow-sm xl:shadow-none">
-                        <CardHeader className="space-y-1 px-3 py-2 pb-0">
-                          <CardTitle className="text-sm font-semibold">Import contract</CardTitle>
-                          <CardDescription className="text-[10px] leading-snug line-clamp-2">
-                            Demurrage, dispatch, and other CP terms.
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="px-3 pb-3 pt-2">
-                          <ImportContractLaytimeForm
-                            contractId={sof.vesselCall.importContract.id}
-                            embedded
-                            embeddedCompact
-                            showCargoFields={false}
-                            showWeekFields={false}
-                            readOnly={sof.status === "CLOSED"}
-                            vesselCallId={sof.vesselCall.id}
-                            vesselCallApproxTotalWeightTon={sof.vesselCall.approxTotalWeightTon}
-                            onSaved={() => void qc.invalidateQueries({ queryKey: ["mother-sof", id] })}
-                            onUnlinked={() =>
-                              void qc.invalidateQueries({ queryKey: ["mother-sof", id] })
-                            }
-                          />
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <VesselCallImportContractLinkPanel
-                        vesselCallId={sof.vesselCall.id}
-                        readOnly={sof.status === "CLOSED"}
-                        onLinked={() => void qc.invalidateQueries({ queryKey: ["mother-sof", id] })}
-                      />
-                    )}
-
-                    <SofEventsVesselLaytimeSetupCard
-                      vesselCall={sof.vesselCall}
-                      readOnly={sof.status === "CLOSED"}
-                      invalidateQueryKeys={[["mother-sof", id]]}
-                      showContractLink={false}
-                      showWeek={false}
-                      showNor
-                      onNorSaved={() => {
-                        if (sof.status !== "CLOSED") void runLaytimeRecalculate();
-                      }}
-                    />
-                    <SofLaytimeStatementParamsCard
-                      readOnly={sof.status === "CLOSED"}
-                      serverSyncToken={sof.updatedAt}
-                      laytimePartialCargoMt={sof.laytimePartialCargoMt}
-                      laytimeHolidays={sof.laytimeHolidays}
-                      patchSof={(body) => updateMotherSof(id, body)}
-                      invalidateQueryKeys={[["mother-sof", id]]}
-                      showPartialCargo={false}
-                    />
-
-                    <Card className="shadow-sm xl:shadow-none">
-                      <CardHeader className="space-y-0 px-3 py-2 pb-0">
-                        <CardTitle className="text-sm font-semibold">Calendar zone</CardTitle>
-                      </CardHeader>
-                      <CardContent className="flex flex-col gap-2 px-3 pb-3 pt-2 sm:flex-row sm:items-end">
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <Label htmlFor="lay-tz-tab" className="text-xs">
-                            IANA time zone (GMT shown for reference)
-                          </Label>
-                          <Input
-                            id="lay-tz-tab"
-                            className="h-8 font-mono text-sm"
-                            list={layTzDatalistId}
-                            value={layTz}
-                            onChange={(e) => setLayTz(e.target.value)}
-                            placeholder={DEFAULT_LAYTIME_IANA_ZONE}
-                            autoComplete="off"
-                            disabled={sof.status === "CLOSED"}
-                          />
-                          <datalist id={layTzDatalistId}>
-                            {LAYTIME_TIMEZONE_SUGGESTIONS.map((z) => (
-                              <option key={z} value={z}>
-                                {formatIanaZoneSuggestionLabel(z)}
-                              </option>
-                            ))}
-                          </datalist>
-                          {layTzGmtPreview ? (
-                            <p className="text-[10px] leading-snug text-muted-foreground">
-                              {layTz.trim() ? (
-                                <>
-                                  <span className="font-mono text-foreground">{layTzPreviewIana}</span>{" "}
-                                  —{" "}
-                                  <span className="font-medium text-foreground">{layTzGmtPreview}</span>{" "}
-                                  now (DST can shift this).
-                                </>
-                              ) : (
-                                <>
-                                  Blank uses backend default{" "}
-                                  <span className="font-mono text-foreground">
-                                    {DEFAULT_LAYTIME_IANA_ZONE}
-                                  </span>{" "}
-                                  —{" "}
-                                  <span className="font-medium text-foreground">{layTzGmtPreview}</span>{" "}
-                                  now.
-                                </>
-                              )}
-                            </p>
-                          ) : layTz.trim() ? (
-                            <p className="text-[10px] text-destructive">
-                              Unknown zone; check the IANA spelling.
-                            </p>
-                          ) : null}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="shrink-0"
-                          disabled={sof.status === "CLOSED" || patchVcLayTzMut.isPending}
-                          onClick={() => patchVcLayTzMut.mutate()}
-                        >
-                          Save
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  </CollapsibleContent>
-                </Collapsible>
-              </aside>
+              {laytimeSetupAside}
             </div>
             {laytimePersistBar}
             </>

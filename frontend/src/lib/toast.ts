@@ -6,14 +6,24 @@
 
 export type ToastVariant = "info" | "success" | "error" | "warning";
 
+export type ToastAction = {
+  label: string;
+  variant?: "primary" | "secondary";
+  onClick: () => void;
+};
+
 export type ToastInput = {
   message: string;
   /** Defaults to "info". */
   variant?: ToastVariant;
-  /** Defaults vary by variant: info/success 4s, warning 6s, error 8s. */
+  /** Defaults vary by variant: info/success 4s, warning 6s, error 8s. 0 = stay until dismissed. */
   durationMs?: number;
   /** Defaults to "Notice" / "Success" / "Error" / "Heads up" by variant. */
   title?: string;
+  /** Action buttons (e.g. confirm / cancel). Implies `durationMs: 0` when unset. */
+  actions?: ToastAction[];
+  /** Called when the toast is dismissed via the close control (not when `dismiss` is silent). */
+  onDismiss?: () => void;
 };
 
 export type ToastRecord = {
@@ -22,6 +32,8 @@ export type ToastRecord = {
   message: string;
   title: string;
   durationMs: number;
+  actions?: ToastAction[];
+  createdAt: number;
 };
 
 const titleByVariant: Record<ToastVariant, string> = {
@@ -40,6 +52,7 @@ const defaultDurationByVariant: Record<ToastVariant, number> = {
 
 let nextId = 1;
 const listeners = new Set<(toasts: ToastRecord[]) => void>();
+const dismissCallbacks = new Map<number, () => void>();
 let toasts: ToastRecord[] = [];
 
 function emit() {
@@ -50,13 +63,21 @@ function emit() {
 
 function push(input: ToastInput): number {
   const variant = input.variant ?? "info";
+  const hasActions = Boolean(input.actions?.length);
+  const durationMs =
+    input.durationMs ?? (hasActions ? 0 : defaultDurationByVariant[variant]);
   const record: ToastRecord = {
     id: nextId++,
     variant,
     message: input.message,
     title: input.title ?? titleByVariant[variant],
-    durationMs: input.durationMs ?? defaultDurationByVariant[variant]
+    durationMs,
+    actions: input.actions,
+    createdAt: Date.now()
   };
+  if (input.onDismiss) {
+    dismissCallbacks.set(record.id, input.onDismiss);
+  }
   toasts = [...toasts, record];
   emit();
   if (record.durationMs > 0) {
@@ -65,7 +86,11 @@ function push(input: ToastInput): number {
   return record.id;
 }
 
-export function dismiss(id: number) {
+export function dismiss(id: number, opts?: { silent?: boolean }) {
+  if (!opts?.silent) {
+    dismissCallbacks.get(id)?.();
+  }
+  dismissCallbacks.delete(id);
   const next = toasts.filter((t) => t.id !== id);
   if (next.length === toasts.length) return;
   toasts = next;

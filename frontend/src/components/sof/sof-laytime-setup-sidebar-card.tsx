@@ -11,7 +11,7 @@ import {
 } from "@/components/sof/sof-laytime-week-window-form";
 
 export type { LaytimeWeekPayloadGetter };
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent } from "@/components/ui/card";
 
 export type SofLaytimeSetupSidebarCardProps = {
   cargo?: SofLaytimeCargoAllowanceInputProps;
@@ -22,15 +22,8 @@ export function SofLaytimeSetupSidebarCard({ cargo, week }: SofLaytimeSetupSideb
   if (!cargo && !week) return null;
 
   return (
-    <Card className="shadow-sm xl:border-0 xl:bg-transparent xl:shadow-none">
-      <CardHeader className="space-y-0.5 px-3 py-2.5 pb-0">
-        <CardTitle className="text-sm font-semibold">Laytime setup</CardTitle>
-        <CardDescription className="text-[10px] leading-snug">
-          Allowed time = (partial cargo if set, else total cargo) ÷ discharge rate (MT/day) × 24 h.
-          Save to update allowance; the sheet refreshes after the first recalculate.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-0 px-3 pb-3 pt-2">
+    <div className="space-y-0">
+      <CardContent className="space-y-0 px-0 pb-0 pt-0">
         {cargo ? (
           <section className="border-b border-border/80 py-3 first:pt-0">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -48,6 +41,6 @@ export function SofLaytimeSetupSidebarCard({ cargo, week }: SofLaytimeSetupSideb
           </section>
         ) : null}
       </CardContent>
-    </Card>
+    </div>
   );
 }

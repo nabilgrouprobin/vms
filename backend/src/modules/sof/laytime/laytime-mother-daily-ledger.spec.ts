@@ -5,8 +5,10 @@ import { DateTime } from "luxon";
 import {
   buildMotherLaytimeDailyLedger,
   contactHoursInRange,
+  contactWindowInRange,
   contactHoursOnCalendarDay,
   contactHoursOnNorTenderedCalendarDay,
+  contactWindowOnNorTenderedCalendarDay,
   durationHoursOnCalendarDay,
   excludedWeekdayNamesFromWeekWindow,
   isJsDayInWorkSpan,
@@ -67,6 +69,10 @@ describe("contactHoursInRange (Sun 08:00 – Thu 17:00, Asia/Dhaka)", () => {
     const dayEnd = dayStart.plus({ days: 1 });
     const h = contactHoursInRange(dayStart, dayEnd, dayStart, zone, w);
     assert.ok(Math.abs(h - 16) < 0.02);
+    const win = contactWindowInRange(dayStart, dayEnd, dayStart, zone, w);
+    assert.ok(win);
+    assert.equal(win.from.toFormat("HH:mm"), "08:00");
+    assert.equal(win.to.toFormat("HH:mm"), "00:00");
   });
 
   it("Thursday is 17h contact (00:00–17:00)", () => {
@@ -120,6 +126,9 @@ describe("NOR tender contact", () => {
     const dayEnd = dayStart.plus({ days: 1 });
     const h = contactHoursOnNorTenderedCalendarDay(dayStart, nor, dayEnd, zone, w);
     assert.equal(h, 11);
+    const win = contactWindowOnNorTenderedCalendarDay(dayStart, nor, dayEnd, zone, w);
+    assert.ok(win);
+    assert.equal(win.from.toFormat("HH:mm"), "13:00");
   });
 
   it("NOR at/after noon → 0 contact on tender day", () => {
@@ -369,6 +378,10 @@ describe("to count / not to count from SOF", () => {
     });
     const row = ledger.rows.find((r) => r.date === "2026-05-04");
     assert.ok(row);
+    if (row.contactHour > 0.05) {
+      assert.ok(row.contactStartsAt);
+      assert.ok(row.contactEndsAt);
+    }
     assert.ok(Math.abs(row.toCountHour + row.notToCountHour - row.contactHour) < 0.05);
     assert.ok(row.despatchHour >= 0);
     assert.ok(
@@ -413,6 +426,89 @@ describe("to count / not to count from SOF", () => {
     assert.ok(split.toCountHour > contact * 0.9, `expected mostly count, got ${split.toCountHour}`);
     assert.ok(split.notToCountHour < 0.05, `expected no not-count padding, got ${split.notToCountHour}`);
     assert.ok(Math.abs(split.toCountHour + split.notToCountHour - contact) < 0.05);
+  });
+
+  it("credits SOF not-count wall time on calendar day into contact not-count (May 17 style)", () => {
+    const day = DateTime.fromObject({ year: 2026, month: 5, day: 17, hour: 12 }, { zone });
+    const dayStart = day.startOf("day");
+    const dayEnd = dayStart.plus({ days: 1 });
+    const contact = contactHoursOnCalendarDay(dayStart, dayStart, dayEnd, zone, week);
+    assert.ok(Math.abs(contact - 16) < 0.05);
+
+    const segments = [
+      {
+        periodFrom: DateTime.fromObject(
+          { year: 2026, month: 5, day: 17, hour: 0 },
+          { zone }
+        ).toJSDate(),
+        periodTo: DateTime.fromObject({ year: 2026, month: 5, day: 17, hour: 2 }, { zone }).toJSDate(),
+        elapsedWallHours: 2,
+        countingHours: 2,
+        countsAsLaytime: false,
+        closingEventId: "e-nc",
+        accumulatedUsedHours: 0
+      }
+    ];
+
+    const split = laytimeToCountNotToCountOnDay(
+      segments,
+      dayStart,
+      dayEnd,
+      dayStart,
+      dayEnd,
+      zone,
+      week,
+      contact,
+      false
+    );
+    assert.ok(
+      Math.abs(split.notToCountHour - 2) < 0.05,
+      `expected 2h not count, got ${split.notToCountHour}`
+    );
+    assert.ok(
+      Math.abs(split.toCountHour - (contact - 2)) < 0.1,
+      `expected ${contact - 2}h count, got ${split.toCountHour}`
+    );
+  });
+
+  it("unfilled contact on a day with no overlapping SOF defaults to count not not-count", () => {
+    const day = DateTime.fromObject({ year: 2026, month: 5, day: 17, hour: 12 }, { zone });
+    const dayStart = day.startOf("day");
+    const dayEnd = dayStart.plus({ days: 1 });
+    const contact = contactHoursOnCalendarDay(dayStart, dayStart, dayEnd, zone, week);
+    assert.ok(Math.abs(contact - 16) < 0.05, `Sun contact ${contact}`);
+
+    const segments = [
+      {
+        periodFrom: DateTime.fromObject(
+          { year: 2026, month: 5, day: 15, hour: 6, minute: 40 },
+          { zone }
+        ).toJSDate(),
+        periodTo: DateTime.fromObject({ year: 2026, month: 5, day: 16, hour: 0 }, { zone }).toJSDate(),
+        elapsedWallHours: 17.33,
+        countingHours: 17.33,
+        countsAsLaytime: true,
+        closingEventId: "e1",
+        accumulatedUsedHours: 17.33
+      }
+    ];
+
+    const split = laytimeToCountNotToCountOnDay(
+      segments,
+      dayStart,
+      dayEnd,
+      dayStart,
+      dayEnd,
+      zone,
+      week,
+      contact,
+      false
+    );
+    assert.ok(
+      split.notToCountHour < 0.05,
+      `expected no false not-count on idle Sunday, got ${split.notToCountHour}`
+    );
+    assert.ok(Math.abs(split.toCountHour - contact) < 0.05);
   });
 
   it("zero to-count and not-to-count on free-time-only days", () => {

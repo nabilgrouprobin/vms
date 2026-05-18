@@ -7,22 +7,22 @@ import { Button } from "@/components/ui/button";
 import { formatDt } from "@/lib/format";
 import { formatDecimalHoursToHMin } from "@/lib/laytime-hours-format";
 import type { LaytimeBreakdown } from "@/lib/sof-api";
+import { cn } from "@/lib/utils";
 
 export type SofDetailLaytimeSheetsStripProps = {
   heading: string;
-  /** Shown under the heading before the first successful recalculate. */
-  idleHint: ReactNode;
-  /** Present after recalculate; drives “Last run…” and the metrics line under the bar. */
+  idleHint?: ReactNode;
+  compact?: boolean;
   breakdown: LaytimeBreakdown | null | undefined;
   recalculateDisabled: boolean;
   recalculatePending: boolean;
   onRecalculate: () => void;
 };
 
-/** Shared laytime tab header: calculator icon, last-run or idle hint, recalculate, optional breakdown line. */
 export function SofDetailLaytimeSheetsStrip({
   heading,
   idleHint,
+  compact = false,
   breakdown,
   recalculateDisabled,
   recalculatePending,
@@ -30,23 +30,30 @@ export function SofDetailLaytimeSheetsStrip({
 }: SofDetailLaytimeSheetsStripProps) {
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Calculator className="size-4 shrink-0 text-primary" aria-hidden />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{heading}</p>
-            {breakdown ? (
-              <p className="truncate text-[11px] text-muted-foreground">
-                Last run · commence {formatDt(breakdown.commenceAt)}
-                {breakdown.allowedHours != null
-                  ? ` · free ${formatDecimalHoursToHMin(breakdown.allowedHours)}`
-                  : ""}
-              </p>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">{idleHint}</p>
-            )}
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2 rounded-md border border-border bg-card",
+          compact ? "justify-end px-2 py-1" : "justify-between px-3 py-2"
+        )}
+      >
+        {!compact ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <Calculator className="size-4 shrink-0 text-primary" aria-hidden />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{heading}</p>
+              {breakdown ? (
+                <p className="truncate text-[11px] text-muted-foreground">
+                  Last run · commence {formatDt(breakdown.commenceAt)}
+                  {breakdown.allowedHours != null
+                    ? ` · free ${formatDecimalHoursToHMin(breakdown.allowedHours)}`
+                    : ""}
+                </p>
+              ) : idleHint ? (
+                <p className="text-[11px] text-muted-foreground">{idleHint}</p>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -58,7 +65,7 @@ export function SofDetailLaytimeSheetsStrip({
           {recalculatePending ? "Working…" : "Recalculate"}
         </Button>
       </div>
-      {breakdown ? (
+      {!compact && breakdown ? (
         <p className="text-[11px] leading-snug text-muted-foreground">
           {breakdown.allowedSource}
           {" · "}

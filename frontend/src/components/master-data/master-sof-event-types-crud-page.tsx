@@ -127,7 +127,6 @@ export function MasterSofEventTypesCrudPage() {
       return patchMasterSofEventType(editing.id, {
         name: name.trim(),
         scope,
-        category,
         isActive
       });
     },
@@ -269,7 +268,6 @@ export function MasterSofEventTypesCrudPage() {
                     <th className="px-3 py-2 font-medium">Code</th>
                     <th className="px-3 py-2 font-medium">Name</th>
                     <th className="px-3 py-2 font-medium">Scope</th>
-                    <th className="px-3 py-2 font-medium">Category</th>
                     <th className="px-3 py-2 font-medium">Events</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="min-w-[9rem] px-3 py-2 text-right font-medium">Actions</th>
@@ -281,15 +279,6 @@ export function MasterSofEventTypesCrudPage() {
                       <td className="px-3 py-2 font-mono text-xs">{row.code}</td>
                       <td className="px-3 py-2 font-medium">{row.name}</td>
                       <td className="px-3 py-2 text-muted-foreground">{fmtScope(row.scope)}</td>
-                      <td className="px-3 py-2">
-                        {row.category === "HOLD_DELAY" ? (
-                          <Badge variant="warning">Hold</Badge>
-                        ) : row.category === "PREPARATION" ? (
-                          <Badge variant="secondary">Preparation</Badge>
-                        ) : (
-                          <span className="text-muted-foreground">Normal</span>
-                        )}
-                      </td>
                       <td className="px-3 py-2 text-muted-foreground">{row._count.sofEvents}</td>
                       <td className="px-3 py-2">
                         {row.deletedAt ? (
@@ -416,27 +405,6 @@ export function MasterSofEventTypesCrudPage() {
               ))}
             </select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="set-category">Category</Label>
-            <select
-              id="set-category"
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-              value={category}
-              disabled={readOnly || Boolean(!creating && editing?.deletedAt)}
-              onChange={(e) => setCategory(e.target.value as SofEventTypeCategoryUi)}
-            >
-              {SOF_EVENT_TYPE_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {fmtCategory(c)}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Hold excludes laytime; preparation credits separately in the daily sheet; normal counts as
-              discharge / utilize time.
-            </p>
-          </div>
-
           {!creating && editing?.deletedAt === null ? (
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <input

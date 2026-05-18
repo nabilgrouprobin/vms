@@ -106,34 +106,6 @@ const demurrageRowClass =
 const laytimeExpiresRowClass =
   "border-l-4 border-l-amber-400 bg-amber-50/50 dark:border-l-amber-300 dark:bg-amber-950/25";
 
-function LaytimeRowStatusBadge({
-  onDemurrage,
-  laytimeExpires
-}: {
-  onDemurrage: boolean;
-  laytimeExpires: boolean;
-}) {
-  if (laytimeExpires) {
-    return (
-      <span className="inline-flex shrink-0 items-center rounded-full border border-amber-500/70 bg-white px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-400/60 dark:bg-zinc-900 dark:text-amber-100">
-        Expires
-      </span>
-    );
-  }
-  if (onDemurrage) {
-    return (
-      <span className="inline-flex shrink-0 items-center rounded-full border border-amber-600/60 bg-amber-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-950 dark:border-amber-500/50 dark:bg-amber-900/70 dark:text-amber-50">
-        Dem
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-background px-1.5 py-px text-[9px] font-medium text-muted-foreground">
-      LT
-    </span>
-  );
-}
-
 function LaytimeHourCell({
   value,
   variant = "default"
@@ -171,9 +143,8 @@ function DailySheetLegend() {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/15 px-2 py-1 text-[10px] text-muted-foreground">
       <span className="font-semibold text-foreground">Daily sheet</span>
       <span>
-        Duration = day in laytime. Contact = contract window. Free = Duration − Contact (not
-        split on SOF). Count + Not count = Contact (from Events). Despatch = allowed − total
-        used (cumulative Count). Despatch = allowed − total used.
+        Contract = hours in the working window (Starts at / Ends at). Free = day in laytime minus
+        contract. Count + Not count = contract (from Events). Despatch = allowed − total used.
       </span>
       <span className="inline-flex items-center gap-1">
         <LaytimeHourCell value={16} variant="contact" />
@@ -217,23 +188,27 @@ export function MotherLaytimeTimesheetTable({
 
   const dailyTable = (
     <div className="space-y-3">
-      <DailySheetLegend />
       <div className="w-full overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="w-full min-w-[780px] border-collapse text-[11px]">
           <thead className="sticky top-0 z-[1] bg-muted/98 backdrop-blur-sm">
             <tr className="border-b border-border">
               <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">Date</th>
+              <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">
+                Starts at
+              </th>
+              <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">
+                Ends at
+              </th>
               <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">Day</th>
-              <th className="px-2 py-1 text-left text-[10px] font-semibold text-foreground">St</th>
-              <Th className="border-l border-border/80" title="Calendar hours in laytime this day (24h mid-range; partial first/last day).">
-                Duration
-              </Th>
-              <Th title="Contract contact hours this day (NOR rules on tender day; 24h after demurrage).">
-                Contact
+              <Th
+                className="border-l border-border/80"
+                title="Contract hours this day (NOR rules on tender day; 24h after demurrage)."
+              >
+                Contract
               </Th>
               <Th title="Duration minus contact.">Free</Th>
               <Th title="SOF hours in contact window tagged Count.">Count</Th>
-              <Th title="SOF hours in contact tagged Not count (Count + Not count = contact).">
+              <Th title="Not count in the contract contact window. Includes SOF periods marked Not count on this calendar day (even before contact opens). Count + Not count = Contract.">
                 Not count
               </Th>
               <Th title="Cumulative sum of Count hours (against allowance).">Total used</Th>
@@ -284,16 +259,16 @@ export function MotherLaytimeTimesheetTable({
                   <td className="whitespace-nowrap px-2 py-1 font-mono text-[10px] tabular-nums text-foreground">
                     {r.date}
                   </td>
+                  <td className="whitespace-nowrap px-2 py-1 font-mono text-[10px] tabular-nums text-foreground">
+                    {r.contactStartsAt ?? "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1 font-mono text-[10px] tabular-nums text-foreground">
+                    {r.contactEndsAt ?? "—"}
+                  </td>
                   <td className="whitespace-nowrap px-2 py-1 text-[10px] capitalize text-foreground">
                     {r.weekday.slice(0, 3)}
                   </td>
-                  <td className="whitespace-nowrap px-2 py-1">
-                    <LaytimeRowStatusBadge onDemurrage={onDem} laytimeExpires={expires} />
-                  </td>
                   <td className="border-l border-border/50 px-2 py-1 text-right">
-                    <LaytimeHourCell value={r.durationHour ?? 0} variant="default" />
-                  </td>
-                  <td className="px-2 py-1 text-right">
                     <LaytimeHourCell
                       value={r.contactHour}
                       variant={onDem ? "default" : contactH > 0.005 ? "contact" : "muted"}
@@ -311,7 +286,11 @@ export function MotherLaytimeTimesheetTable({
                   <td className="px-2 py-1 text-right">
                     <LaytimeHourCell
                       value={r.notToCountHour ?? r.idleHour}
-                      variant="muted"
+                      variant={
+                        (coerceFiniteNumber(r.notToCountHour) ?? 0) > 0.005
+                          ? "default"
+                          : "muted"
+                      }
                     />
                   </td>
                   <td className="px-2 py-1 text-right">
@@ -358,13 +337,13 @@ export function MotherLaytimeTimesheetTable({
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-border bg-muted/40">
-              <td colSpan={3} className="px-2 py-1 text-[10px] font-semibold text-muted-foreground">
-                Totals
+              <td colSpan={4} className="px-2 py-1 text-[10px] font-semibold text-muted-foreground">
+                <span className="block">Totals</span>
+                <span className="block font-normal text-[9px] text-muted-foreground/90">
+                  Contract days only (excl. weekly off &amp; holidays)
+                </span>
               </td>
               <td className="border-l border-border/50 px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
-                {fmt2(dailyLedger.totalDurationHour ?? 0)}
-              </td>
-              <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">
                 {fmt2(dailyLedger.totalContactHour)}
               </td>
               <td className="px-2 py-1 text-right font-mono text-[10px] font-semibold tabular-nums">

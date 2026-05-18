@@ -11,7 +11,7 @@ export type SofEventsLaytimePreviewProps = {
   className?: string;
 };
 
-/** Live laytime summary on the Events tab (updates when Count / Not count changes). */
+/** Charter laytime snapshot on the Events tab (after recalculate). */
 export function SofEventsLaytimePreview({
   pending,
   breakdown,
@@ -21,14 +21,12 @@ export function SofEventsLaytimePreview({
   if (!breakdown && !pending) {
     return (
       <p className={cn("text-[11px] text-muted-foreground", className)}>
-        Laytime preview appears after the first calculation. Use{" "}
-        <span className="font-medium text-foreground">Save laytime</span> below when finished.
+        Charter laytime appears after the first calculation. Use{" "}
+        <span className="font-medium text-foreground">Save laytime</span> when finished.
       </p>
     );
   }
 
-  const countH = dailyLedger?.totalToCountHour ?? dailyLedger?.totalWorkingHour;
-  const notCountH = dailyLedger?.totalNotToCountHour ?? dailyLedger?.totalIdleHour;
   const demH = dailyLedger?.totalDemurrageHour;
 
   return (
@@ -40,10 +38,10 @@ export function SofEventsLaytimePreview({
       )}
     >
       <p className="font-semibold text-foreground">
-        Laytime preview {pending ? "(updating…)" : ""}
+        Charter laytime {pending ? "(updating…)" : ""}
       </p>
-      {breakdown && dailyLedger ? (
-        <div className="mt-1 grid gap-1 font-mono tabular-nums sm:grid-cols-2 lg:grid-cols-4">
+      {breakdown ? (
+        <div className="mt-1 grid gap-1 font-mono tabular-nums sm:grid-cols-3">
           <span>
             Allowed{" "}
             <span className="font-semibold text-foreground">
@@ -53,15 +51,16 @@ export function SofEventsLaytimePreview({
             </span>
           </span>
           <span>
-            Count{" "}
-            <span className="font-semibold text-foreground">
-              {countH != null ? formatDecimalHoursToHMin(countH) : "—"}
-            </span>
-          </span>
-          <span>
-            Not count{" "}
-            <span className="font-semibold text-foreground">
-              {notCountH != null ? formatDecimalHoursToHMin(notCountH) : "—"}
+            Balance{" "}
+            <span
+              className={cn(
+                "font-semibold",
+                (breakdown.balanceHours ?? 0) < -0.01
+                  ? "text-amber-900 dark:text-amber-100"
+                  : "text-foreground"
+              )}
+            >
+              {formatDecimalHoursToHMin(breakdown.balanceHours)}
             </span>
           </span>
           <span>
@@ -72,6 +71,10 @@ export function SofEventsLaytimePreview({
           </span>
         </div>
       ) : null}
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        Uses contract week, contact, and holidays. Raw Count / Not count totals are above the
+        events table.
+      </p>
     </div>
   );
 }

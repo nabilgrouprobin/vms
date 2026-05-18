@@ -55,6 +55,7 @@ import {
   type SofEventInfinitePages
 } from "@/lib/sof-event-display";
 import { fetchSofEventTypeOptions } from "@/lib/master-data-api";
+import { formatSofUserError } from "@/lib/format-sof-user-error";
 import { parseApiErr } from "@/lib/parse-api-error";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -481,8 +482,9 @@ export function LighterSofDetailView({
       scheduleLaytimeRecalculate();
     },
     onError: (e) => {
-      const msg = parseApiErr(e);
+      const msg = formatSofUserError(e);
       setEvErr(msg);
+      toast.error(msg);
       // Overlap errors typically indicate that the cached events list is
       // stale; refresh it so the user can see the conflicting event in the
       // table without having to manually reload.
@@ -730,7 +732,12 @@ export function LighterSofDetailView({
             eventTypeOptions={eventTypesQ.data ?? []}
             readOnly={sof.status === "CLOSED"}
             eventsQueryKey={["lighter-sof-events", id]}
-            eventsCsvBasename={`${sof.sofNo}-events`}
+            eventsCsvBasename={
+              sof.lighterTrip
+                ? `${sof.lighterTrip.lighterVessel.name}-${sof.lighterTrip.tripNo}-events`
+                : "lighter-sof-events"
+            }
+            showStatusColumn={false}
             onEventsChanged={() => scheduleLaytimeRecalculate()}
             laytimeRecalcPending={layRecalcPending}
             laytimeBreakdown={layRecalc?.breakdown}
@@ -742,6 +749,9 @@ export function LighterSofDetailView({
               fetchNextPage: () => eventsQ.fetchNextPage()
             }}
             fillGapPreparing={fillGapPreparing}
+            compactChrome={
+              Boolean(hideWorkspaceChrome) && workspaceSection === "events"
+            }
           />
         </TabsContent>
 

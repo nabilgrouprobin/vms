@@ -1,7 +1,6 @@
 "use client";
 
-import { Check, Minus } from "lucide-react";
-
+import { confirmLaytimeCountChange } from "@/lib/confirm-dialog";
 import { cn } from "@/lib/utils";
 
 export type SofLaytimeCountToggleProps = {
@@ -10,6 +9,8 @@ export type SofLaytimeCountToggleProps = {
   disabled?: boolean;
   /** Compact pill for event table rows (laytime sheet density). */
   variant?: "default" | "table";
+  /** Ask before switching Count ↔ Not count (recommended in the events table). */
+  confirmChange?: boolean;
   className?: string;
 };
 
@@ -19,9 +20,19 @@ export function SofLaytimeCountToggle({
   onChange,
   disabled,
   variant = "default",
+  confirmChange = false,
   className
 }: SofLaytimeCountToggleProps) {
   const isTable = variant === "table";
+
+  const apply = async (next: boolean) => {
+    if (next === value) return;
+    if (confirmChange) {
+      const ok = await confirmLaytimeCountChange(next);
+      if (!ok) return;
+    }
+    onChange(next);
+  };
 
   return (
     <div
@@ -40,36 +51,25 @@ export function SofLaytimeCountToggle({
         disabled={disabled}
         title="Count — hours in contact window count on the laytime sheet"
         className={cn(
-          "inline-flex items-center justify-center gap-0.5 font-semibold transition-all duration-200",
+          "inline-flex items-center justify-center font-semibold transition-all duration-200",
           isTable
             ? "rounded-full px-3 py-1 text-[11px] leading-tight"
             : "rounded px-2.5 py-1 text-xs",
           value
-            ? isTable
-              ? "bg-emerald-600 text-white shadow-sm dark:bg-emerald-600"
-              : "bg-emerald-600 text-white shadow-sm dark:bg-emerald-600"
-            : isTable
-              ? "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            ? "bg-emerald-600 text-white shadow-sm dark:bg-emerald-600"
+            : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         )}
         aria-pressed={value}
-        onClick={() => onChange(true)}
+        onClick={() => apply(true)}
       >
-        {isTable ? (
-          <>
-            <Check className="size-3.5 shrink-0" strokeWidth={2.5} aria-hidden />
-            <span>Count</span>
-          </>
-        ) : (
-          "Count"
-        )}
+        Count
       </button>
       <button
         type="button"
         disabled={disabled}
         title="Not count — excluded from laytime to-count; still fills contact on sheet"
         className={cn(
-          "inline-flex items-center justify-center gap-0.5 font-semibold transition-all duration-200",
+          "inline-flex items-center justify-center font-semibold transition-all duration-200",
           isTable
             ? "rounded-full px-3 py-1 text-[11px] leading-tight"
             : "rounded px-2.5 py-1 text-xs",
@@ -77,21 +77,12 @@ export function SofLaytimeCountToggle({
             ? isTable
               ? "bg-muted-foreground/25 text-foreground shadow-sm dark:bg-muted-foreground/30"
               : "bg-muted-foreground/20 text-foreground shadow-sm"
-            : isTable
-              ? "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         )}
         aria-pressed={!value}
-        onClick={() => onChange(false)}
+        onClick={() => apply(false)}
       >
-        {isTable ? (
-          <>
-            <Minus className="size-3.5 shrink-0" strokeWidth={2.5} aria-hidden />
-            <span>Not count</span>
-          </>
-        ) : (
-          "Not count"
-        )}
+        Not count
       </button>
     </div>
   );

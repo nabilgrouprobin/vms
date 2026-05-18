@@ -288,7 +288,7 @@ export function SelectedSofChip({
   kind,
   title,
   details,
-  changeLabel = "Change SOF",
+  changeLabel = "Change Vessel",
   /** Prefer with `onNavigateClick` — same reliable navigation as `Link href={listHref}` (works inside nested Tabs/Suspense). */
   changeHref,
   onNavigateClick,
@@ -314,7 +314,7 @@ export function SelectedSofChip({
             {kind === "mother" ? "Mother" : "Lighter"}
           </Badge>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">{title}</div>
+            <div className="truncate text-lg font-bold tracking-tight">{title}</div>
             {details ? (
               <div className="truncate text-xs text-muted-foreground">{details}</div>
             ) : null}

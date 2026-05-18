@@ -50,7 +50,7 @@ const nav: Array<{
 }> = [
   { path: "/", label: "Home", icon: Anchor },
   { path: "/vessel-sof/overview", label: "Overview", icon: LayoutDashboard },
-  { path: "/vessel-sof/events", label: "Events", icon: ListChecks },
+  { path: "/vessel-sof/events", label: "SOF", icon: ListChecks },
   { path: "/vessel-sof/laytime", label: "Laytime calculation", icon: Calculator },
   {
     path: "/trips",

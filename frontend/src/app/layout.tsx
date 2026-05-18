@@ -6,6 +6,7 @@ import { AuthGate } from "@/components/auth/auth-gate";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { ConfirmDialogHost } from "@/components/ui/confirm-dialog-host";
 import { Toaster } from "@/components/ui/toaster";
 
 import "./globals.css";
@@ -43,6 +44,7 @@ export default function RootLayout({
                 <AppShell>{children}</AppShell>
               </AuthGate>
               <Toaster />
+              <ConfirmDialogHost />
             </AuthProvider>
           </QueryProvider>
         </ThemeProvider>

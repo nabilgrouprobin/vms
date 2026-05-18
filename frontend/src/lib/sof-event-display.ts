@@ -432,6 +432,68 @@ export type SofEventLatestMetrics = Pick<
 >;
 
 /** Most recent event by `eventTime` (for discharge / context summaries). */
+export type SofCountNotCountSummary = {
+  eventCount: number;
+  /** Σ segment hours where closing event is Count (wall-clock; no holiday/week trim). */
+  countMs: number;
+  /** Σ segment hours where closing event is Not count. */
+  notCountMs: number;
+  /** countMs + notCountMs */
+  totalTaggedMs: number;
+};
+
+const EMPTY_COUNT_NOT_COUNT: SofCountNotCountSummary = {
+  eventCount: 0,
+  countMs: 0,
+  notCountMs: 0,
+  totalTaggedMs: 0
+};
+
+type SofCountNotCountRow = Pick<SofEventListItem, "eventTime" | "countsAsLaytime">;
+
+/**
+ * Event-level Count / Not count totals from consecutive SOF events (closing-event rule).
+ * Does not apply charter working week, holidays, NOR, or contact windows — use the
+ * Laytime tab daily sheet for those figures.
+ */
+export function computeSofCountNotCountSummary(
+  events: SofCountNotCountRow[]
+): SofCountNotCountSummary {
+  if (!events.length) return { ...EMPTY_COUNT_NOT_COUNT };
+
+  const sortable = events
+    .map((ev) => {
+      const t = new Date(ev.eventTime).getTime();
+      return Number.isFinite(t) ? { ev, t } : null;
+    })
+    .filter((r): r is { ev: SofCountNotCountRow; t: number } => r !== null)
+    .sort((a, b) => a.t - b.t);
+
+  if (sortable.length === 0) return { ...EMPTY_COUNT_NOT_COUNT };
+
+  let countMs = 0;
+  let notCountMs = 0;
+
+  for (let i = 1; i < sortable.length; i++) {
+    const prev = sortable[i - 1]!;
+    const curr = sortable[i]!;
+    const dt = Math.max(0, curr.t - prev.t);
+    if (dt === 0) continue;
+    if (curr.ev.countsAsLaytime !== false) {
+      countMs += dt;
+    } else {
+      notCountMs += dt;
+    }
+  }
+
+  return {
+    eventCount: sortable.length,
+    countMs,
+    notCountMs,
+    totalTaggedMs: countMs + notCountMs
+  };
+}
+
 export function latestSofEventMetrics(rows: SofEventListItem[]): SofEventLatestMetrics | null {
   if (rows.length === 0) return null;
   const sorted = [...rows].sort(

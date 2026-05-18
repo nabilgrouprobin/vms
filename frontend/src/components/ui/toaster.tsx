@@ -1,61 +1,116 @@
 "use client";
 
-import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
-import { dismiss, subscribeToToasts, type ToastRecord, type ToastVariant } from "@/lib/toast";
+import {
+  dismiss,
+  subscribeToToasts,
+  type ToastRecord,
+  type ToastVariant
+} from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-const variantStyles: Record<ToastVariant, string> = {
-  info: "border-sky-500/40 bg-sky-50 text-sky-900 dark:bg-sky-950/60 dark:text-sky-100",
-  success:
-    "border-emerald-500/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-100",
-  warning:
-    "border-amber-500/50 bg-amber-50 text-amber-900 dark:bg-amber-950/60 dark:text-amber-100",
-  error:
-    "border-red-500/50 bg-red-50 text-red-900 dark:bg-red-950/60 dark:text-red-100"
+const variantAccent: Record<ToastVariant, string> = {
+  info: "border-l-sky-500",
+  success: "border-l-emerald-500",
+  warning: "border-l-amber-500",
+  error: "border-l-red-500"
 };
+
+const variantIcon: Record<ToastVariant, typeof Info> = {
+  info: Info,
+  success: CheckCircle2,
+  warning: AlertCircle,
+  error: AlertCircle
+};
+
+const TOAST_EXIT_MS = 220;
+
+function ToastCard({
+  toast: t,
+  exiting,
+  onDismiss
+}: {
+  toast: ToastRecord;
+  exiting: boolean;
+  onDismiss: (id: number) => void;
+}) {
+  const Icon = variantIcon[t.variant];
+
+  return (
+    <div
+      role={t.variant === "error" || t.variant === "warning" ? "alert" : "status"}
+      className={cn(
+        "pointer-events-auto w-full max-w-sm rounded-md border border-border border-l-4 bg-card text-card-foreground shadow-md",
+        variantAccent[t.variant],
+        "vms-toast-enter",
+        exiting && "vms-toast-exit"
+      )}
+    >
+      <div className="flex items-start gap-3 p-3">
+        <Icon
+          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground">{t.title}</p>
+          <p className="mt-0.5 text-sm leading-snug text-muted-foreground">{t.message}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onDismiss(t.id)}
+          aria-label="Dismiss"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function Toaster() {
   const [toasts, setToasts] = useState<ToastRecord[]>([]);
+  const [exitingIds, setExitingIds] = useState<Set<number>>(() => new Set());
 
   useEffect(() => subscribeToToasts(setToasts), []);
 
-  if (toasts.length === 0) return null;
+  const requestDismiss = useCallback((id: number) => {
+    setExitingIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    window.setTimeout(() => {
+      dismiss(id);
+      setExitingIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }, TOAST_EXIT_MS);
+  }, []);
+
+  const notifications = toasts.filter((t) => !t.actions?.length);
+
+  if (notifications.length === 0 && exitingIds.size === 0) return null;
 
   return (
     <div
       data-vms-toaster
       aria-live="polite"
-      aria-atomic="true"
-      className="pointer-events-none fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4 sm:bottom-6 sm:right-6 sm:left-auto sm:items-end sm:px-0"
+      className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(100vw-2rem,22rem)] flex-col gap-2"
     >
-      {toasts.map((t) => (
-        <div
+      {notifications.map((t) => (
+        <ToastCard
           key={t.id}
-          role={t.variant === "error" || t.variant === "warning" ? "alert" : "status"}
-          className={cn(
-            "pointer-events-auto w-full max-w-sm overflow-hidden rounded-md border shadow-lg",
-            variantStyles[t.variant]
-          )}
-        >
-          <div className="flex items-start gap-3 p-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-80">
-                {t.title}
-              </p>
-              <p className="mt-0.5 break-words text-sm">{t.message}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => dismiss(t.id)}
-              aria-label="Dismiss notification"
-              className="shrink-0 rounded p-1 text-current opacity-70 transition hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-current"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-        </div>
+          toast={t}
+          exiting={exitingIds.has(t.id)}
+          onDismiss={requestDismiss}
+        />
       ))}
     </div>
   );
