@@ -13,6 +13,7 @@ import {
 } from "@/components/sof/sof-laytime-sidebar-nav";
 import { SofEventsVesselLaytimeSetupCard } from "@/components/sof/sof-events-vessel-laytime-setup-card";
 import { SofLaytimeStatementParamsCard } from "@/components/sof/sof-laytime-statement-params-card";
+import { SofLaytimeSummaryParamsCard } from "@/components/sof/sof-laytime-summary-params-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +33,8 @@ type MotherLaytimeSetupAsideProps = {
   vesselCall: MotherVesselCallDetail;
   sofUpdatedAt: string;
   laytimePartialCargoMt: string | null | undefined;
+  laytimeMinimumAllowedHours: string | null | undefined;
+  laytimeGraceHours: string | null | undefined;
   laytimeHolidays: Parameters<typeof SofLaytimeStatementParamsCard>[0]["laytimeHolidays"];
   cargo: Parameters<typeof SofLaytimeSetupSidebarCard>[0]["cargo"];
   week: Parameters<typeof SofLaytimeSetupSidebarCard>[0]["week"];
@@ -54,6 +57,8 @@ export function MotherLaytimeSetupAside({
   vesselCall,
   sofUpdatedAt,
   laytimePartialCargoMt,
+  laytimeMinimumAllowedHours,
+  laytimeGraceHours,
   laytimeHolidays,
   cargo,
   week,
@@ -127,6 +132,21 @@ export function MotherLaytimeSetupAside({
             showWeek={false}
             showNor
             onNorSaved={onNorSaved}
+          />
+        </SofLaytimeSidebarSection>
+
+        <SofLaytimeSidebarSection
+          id="summary"
+          title="Summary"
+          description="Minimum & grace"
+        >
+          <SofLaytimeSummaryParamsCard
+            readOnly={readOnly}
+            serverSyncToken={sofUpdatedAt}
+            laytimeMinimumAllowedHours={laytimeMinimumAllowedHours}
+            laytimeGraceHours={laytimeGraceHours}
+            patchSof={(body) => updateMotherSof(sofId, body)}
+            invalidateQueryKeys={[["mother-sof", sofId]]}
           />
         </SofLaytimeSidebarSection>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -23,6 +23,7 @@ import {
   SelectedSofChip
 } from "@/components/workspace/mother-lighter-picker";
 import { MotherLighterVesselPickerPanel } from "@/components/workspace/mother-lighter-vessel-picker-panel";
+import { VesselSofAddEventEmptyState } from "@/components/sof/vessel-sof-add-event-empty-state";
 import type { VesselSofWorkspaceSection } from "@/components/sof/detail/types";
 import {
   fetchLighterSofChipPeek,
@@ -31,9 +32,15 @@ import {
   fetchMotherSofs
 } from "@/lib/sof-api";
 import { parseApiErr } from "@/lib/parse-api-error";
+import {
+  filterLighterSofsForPortCall,
+  resolveLighterSofIdForPortCall,
+  resolveMotherSofIdForVesselCall
+} from "@/lib/resolve-vessel-sof-selection";
 import { fetchVesselCall, fetchVesselCalls } from "@/lib/vessel-calls-api";
 import {
   applySearchParams,
+  buildVesselSofWorkspaceUrl,
   reportsDischargePath,
   VESSEL_SOF_CLEAR_SELECTION_EVENT
 } from "@/lib/workspace-paths";
@@ -85,6 +92,7 @@ function VesselSofWorkspaceScaffoldInner({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const qc = useQueryClient();
   const kind: "mother" | "lighter" = searchParams.get("kind") === "lighter" ? "lighter" : "mother";
   const vesselCallId = searchParams.get("vesselCallId")?.trim() ?? "";
   const lighterCallId = searchParams.get("lighterCallId")?.trim() ?? "";
@@ -151,74 +159,54 @@ function VesselSofWorkspaceScaffoldInner({
 
   const selectMotherVesselRow = async (row: VesselCallListRow) => {
     setSofSearch("");
-    let sofId: string | null =
-      row.statementOfFacts?.scope === "MOTHER_VESSEL" ? row.statementOfFacts.id : null;
+    let sofId: string | null = null;
     try {
-      if (!sofId) {
-        const page = await fetchMotherSofs({ vesselCallId: row.id, limit: 5 });
-        const mother = page.data.find((r) => r.vesselCall?.id === row.id) ?? page.data[0];
-        sofId = mother?.id ?? null;
-      }
+      const page = await fetchMotherSofs({ vesselCallId: row.id, limit: 10 });
+      sofId = resolveMotherSofIdForVesselCall(row.id, page.data);
     } catch {
       sofId = null;
     }
-    if (reportsLinkBase) {
-      router.replace(
-        reportsDischargePath("mother", {
+
+    qc.removeQueries({ queryKey: ["mother-sof-events"] });
+    qc.removeQueries({ queryKey: ["vessel-sof-mother-sof-probe"] });
+
+    const nextUrl = reportsLinkBase
+      ? reportsDischargePath("mother", {
           vesselCallId: row.id,
           id: sofId,
           pickSof: null
-        }),
-        { scroll: false }
-      );
-      return;
-    }
-    router.replace(
-      applySearchParams(pathname, searchParams, {
-        kind: "mother",
-        vesselCallId: row.id,
-        lighterCallId: null,
-        lighterVesselId: null,
-        id: sofId ?? null,
-        pickSof: null
-      }),
-      { scroll: false }
-    );
+        })
+      : buildVesselSofWorkspaceUrl(pathname, {
+          kind: "mother",
+          vesselCallId: row.id,
+          id: sofId
+        });
+
+    router.replace(nextUrl, { scroll: false });
   };
 
   const selectLighterCallRow = async (row: VesselCallListRow) => {
     setSofSearch("");
-    const hullId = row.vessel.id;
     let sofId: string | null = null;
     try {
-      const page = await fetchLighterSofs({ lighterVesselId: hullId, limit: 25 });
-      const list = page.data;
-      sofId = list.length === 1 ? list[0].id : null;
+      const page = await fetchLighterSofs({ lighterVesselId: row.vessel.id, limit: 40 });
+      sofId = resolveLighterSofIdForPortCall(row.id, page.data);
     } catch {
       sofId = null;
     }
-    if (reportsLinkBase) {
-      router.replace(
-        reportsDischargePath("lighter", {
+    const nextUrl = reportsLinkBase
+      ? reportsDischargePath("lighter", {
           lighterCallId: row.id,
           id: sofId,
           pickSof: null
-        }),
-        { scroll: false }
-      );
-      return;
-    }
-    router.replace(
-      applySearchParams(pathname, searchParams, {
-        kind: "lighter",
-        lighterCallId: row.id,
-        lighterVesselId: null,
-        vesselCallId: null,
-        id: sofId ?? null,
-        pickSof: null
-      }),
-      { scroll: false }
-    );
+        })
+      : buildVesselSofWorkspaceUrl(pathname, {
+          kind: "lighter",
+          lighterCallId: row.id,
+          id: sofId
+        });
+
+    router.replace(nextUrl, { scroll: false });
   };
 
   const pickSof = (rowId: string) => {
@@ -310,85 +298,17 @@ function VesselSofWorkspaceScaffoldInner({
   });
 
   const lighterProbeQ = useQuery({
-    queryKey: ["vessel-sof-lighter-sof-probe", lighterHullIdResolved],
-    queryFn: () => fetchLighterSofs({ lighterVesselId: lighterHullIdResolved, limit: 25 }),
+    queryKey: ["vessel-sof-lighter-sof-probe", lighterHullIdResolved, lighterCallId],
+    queryFn: () => fetchLighterSofs({ lighterVesselId: lighterHullIdResolved, limit: 40 }),
     enabled: kind === "lighter" && !!lighterCallId && !!lighterHullIdResolved && !id
   });
 
-  useEffect(() => {
-    if (pickSofMode || kind !== "mother" || !vesselCallId || id) return;
-    if (!motherProbeQ.isSuccess || motherProbeQ.isFetching) return;
+  const motherProbeRowsForCall = useMemo(() => {
     const rows = motherProbeQ.data?.data ?? [];
-    if (rows.length !== 1) return;
-    if (reportsLinkBase) {
-      router.replace(
-        reportsDischargePath("mother", { vesselCallId, id: rows[0].id, pickSof: null }),
-        { scroll: false }
-      );
-    } else {
-      router.replace(
-        applySearchParams(pathname, searchParams, {
-          kind: "mother",
-          vesselCallId,
-          id: rows[0].id,
-          pickSof: null
-        }),
-        { scroll: false }
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
-  }, [
-    pickSofMode,
-    kind,
-    vesselCallId,
-    id,
-    motherProbeQ.isSuccess,
-    motherProbeQ.isFetching,
-    motherProbeQ.data,
-    reportsLinkBase,
-    pathname,
-    searchParamsSnapshot,
-    router
-  ]);
+    return rows.filter((r) => r.vesselCall?.id === vesselCallId);
+  }, [motherProbeQ.data, vesselCallId]);
 
-  useEffect(() => {
-    if (pickSofMode || kind !== "lighter" || !lighterCallId || !lighterHullIdResolved || id) return;
-    if (!lighterProbeQ.isSuccess || lighterProbeQ.isFetching) return;
-    const rows = lighterProbeQ.data?.data ?? [];
-    if (rows.length !== 1) return;
-    if (reportsLinkBase) {
-      router.replace(
-        reportsDischargePath("lighter", { lighterCallId, id: rows[0].id, pickSof: null }),
-        { scroll: false }
-      );
-    } else {
-      router.replace(
-        applySearchParams(pathname, searchParams, {
-          kind: "lighter",
-          lighterCallId,
-          id: rows[0].id,
-          pickSof: null
-        }),
-        { scroll: false }
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `searchParamsSnapshot` tracks URL; Next `searchParams` identity churn would retrigger redirects.
-  }, [
-    pickSofMode,
-    kind,
-    lighterCallId,
-    lighterHullIdResolved,
-    id,
-    lighterProbeQ.isSuccess,
-    lighterProbeQ.isFetching,
-    lighterProbeQ.data,
-    reportsLinkBase,
-    pathname,
-    searchParamsSnapshot,
-    router
-  ]);
-
-  const nMotherProbe = motherProbeQ.data?.data?.length ?? 0;
+  const nMotherProbe = motherProbeRowsForCall.length;
   const nLighterProbe = lighterProbeQ.data?.data?.length ?? 0;
 
   const showLighterDisambig =
@@ -439,18 +359,6 @@ function VesselSofWorkspaceScaffoldInner({
         : section === "laytime"
           ? "Laytime calculation"
           : "Discharge";
-
-  const helpText = hasSofSelection
-    ? `Showing ${sectionTitle.toLowerCase()} for the selected SOF — use “Change SOF” above to pick a different one.${
-        section === "laytime"
-          ? " After Recalculate, the results panel matches your plan’s laytime summary (allowed vs. used, demurrage / despatch, exclusions); the full worksheet is below."
-          : ""
-      }`
-    : hasVesselSelection && showLighterDisambig
-      ? "Several SOFs exist for this lighter. Pick one above."
-      : hasVesselSelection
-        ? `Opening ${sectionTitle.toLowerCase()} for this vessel…`
-        : `Choose a mother vessel call or lighter port call. When there is exactly one lighter SOF for that hull, it opens below automatically.`;
 
   const selectedChipTitle = selectedRow
     ? kind === "mother"
@@ -524,7 +432,7 @@ function VesselSofWorkspaceScaffoldInner({
         />
       );
     }
-    if (hasVesselSelection) {
+    if (hasVesselSelection && hasSofSelection) {
       return (
         <SelectedSofChip
           kind={kind}
@@ -537,6 +445,35 @@ function VesselSofWorkspaceScaffoldInner({
           changeHref={clearVesselHref}
           onNavigateClick={notifySheetsBeforeClearSelection}
         />
+      );
+    }
+    if (hasVesselSelection && !hasSofSelection) {
+      return (
+        <div className="space-y-2">
+          <SelectedSofChip
+            kind={kind}
+            title={kind === "mother" ? selectedMotherVesselTitle : selectedLighterCallTitle}
+            details={
+              (kind === "mother" ? selectedMotherVesselDetails : selectedLighterCallDetails) ||
+              undefined
+            }
+            changeLabel="Clear"
+            changeHref={clearVesselHref}
+            onNavigateClick={notifySheetsBeforeClearSelection}
+          />
+          <MotherLighterVesselPickerPanel
+            kind={kind}
+            vesselCallId={vesselCallId}
+            lighterCallId={lighterCallId}
+            search={vesselSearch}
+            debouncedSearch={debouncedVesselSearch}
+            onSearchChange={setVesselSearch}
+            onKindChange={setKind}
+            onSelectMother={selectMotherVesselRow}
+            onSelectLighter={selectLighterCallRow}
+            queriesEnabled
+          />
+        </div>
       );
     }
     return (
@@ -609,6 +546,20 @@ function VesselSofWorkspaceScaffoldInner({
     lighterProbeQ.isSuccess &&
     nLighterProbe === 0;
 
+  const helpText = hasSofSelection
+    ? `Showing ${sectionTitle.toLowerCase()} for the selected SOF — use “Change SOF” above to pick a different one.${
+        section === "laytime"
+          ? " After Recalculate, the results panel matches your plan’s laytime summary (allowed vs. used, demurrage / despatch, exclusions); the full worksheet is below."
+          : ""
+      }`
+    : hasVesselSelection && showLighterDisambig
+      ? "Several SOFs exist for this lighter. Pick one above."
+      : hasVesselSelection && (showMotherNoSof || showLighterNoSof)
+        ? `No SOF on this call yet — use Add event below to create one and record times.`
+        : hasVesselSelection
+          ? `Opening ${sectionTitle.toLowerCase()} for this vessel…`
+          : `Choose a mother vessel call or lighter port call. When there is exactly one lighter SOF for that hull, it opens below automatically.`;
+
   const showMotherProbeErr =
     kind === "mother" && !!vesselCallId && !id && motherProbeQ.isError;
   const showLighterProbeErr =
@@ -634,13 +585,47 @@ function VesselSofWorkspaceScaffoldInner({
   const compactMain =
     hasSofSelection && (section === "events" || section === "laytime");
 
+  const showMotherOpenSingleSof =
+    kind === "mother" &&
+    !!vesselCallId &&
+    !id &&
+    motherProbeQ.isSuccess &&
+    motherProbeRowsForCall.length === 1;
+
+  const lighterSofIdMismatch =
+    kind === "lighter" &&
+    !!lighterCallId &&
+    !!id &&
+    lighterPeekQ.isSuccess &&
+    (() => {
+      const trip = lighterPeekQ.data?.lighterTrip;
+      if (!trip) return false;
+      return (
+        trip.lighterPortCallId !== lighterCallId && trip.vesselCall?.id !== lighterCallId
+      );
+    })();
+
+  const showSofDetail = hasSofSelection && !lighterSofIdMismatch;
+
+  const openMotherSingleSof = useCallback(() => {
+    const row = motherProbeRowsForCall[0];
+    if (!row) return;
+    const nextUrl = reportsLinkBase
+      ? reportsDischargePath("mother", { vesselCallId, id: row.id, pickSof: null })
+      : buildVesselSofWorkspaceUrl(pathname, { kind: "mother", vesselCallId, id: row.id });
+    router.replace(nextUrl, { scroll: false });
+  }, [motherProbeRowsForCall, reportsLinkBase, pathname, router, vesselCallId]);
+
   return (
     <div className={cn("w-full", compactMain ? "space-y-1" : "space-y-6")}>
-      {!compactMain && section === "laytime" ? (
-        <div className="laytime-print-suppress">{topChrome}</div>
-      ) : !compactMain ? (
-        topChrome
-      ) : null}
+      <div
+        className={cn(
+          section === "laytime" && "laytime-print-suppress",
+          compactMain && "mb-1"
+        )}
+      >
+        {topChrome}
+      </div>
       {sofPickerCard}
 
       <div
@@ -664,9 +649,10 @@ function VesselSofWorkspaceScaffoldInner({
           </div>
         )}
 
-        {hasSofSelection ? (
+        {showSofDetail ? (
           kind === "mother" ? (
             <MotherSofDetailView
+              key={`mother-${vesselCallId}-${id}`}
               id={id}
               listHref={listHref}
               workspaceSection={section}
@@ -674,12 +660,24 @@ function VesselSofWorkspaceScaffoldInner({
             />
           ) : (
             <LighterSofDetailView
+              key={`lighter-${lighterCallId}-${id}`}
               id={id}
               listHref={listHref}
               workspaceSection={section}
               hideWorkspaceChrome
             />
           )
+        ) : showMotherOpenSingleSof ? (
+          <Card className="w-full">
+            <CardContent className="space-y-3 py-8 text-center text-sm">
+              <p className="text-muted-foreground">
+                One statement of facts exists for this vessel call.
+              </p>
+              <Button type="button" onClick={openMotherSingleSof}>
+                Open {motherProbeRowsForCall[0]!.sofNo}
+              </Button>
+            </CardContent>
+          </Card>
         ) : bodyLoadingMother || bodyLoadingLighter ? (
           <Skeleton className="h-48 w-full" />
         ) : showMotherProbeErr ? (
@@ -703,28 +701,21 @@ function VesselSofWorkspaceScaffoldInner({
             </CardContent>
           </Card>
         ) : showMotherNoSof ? (
-          <Card className="w-full">
-            <CardContent className="space-y-3 py-8 text-center text-sm">
-              <p className="text-muted-foreground">
-                No mother vessel SOF exists for this call yet. Create one to use{" "}
-                {sectionTitle.toLowerCase()}.
-              </p>
-              <Button asChild variant="secondary">
-                <Link href="/vessel-calls">New vessel call</Link>
-              </Button>
-            </CardContent>
-          </Card>
+          <VesselSofAddEventEmptyState
+            kind="mother"
+            vesselCallId={vesselCallId}
+            lighterCallId=""
+            pathname={pathname}
+            sectionLabel={sectionTitle}
+          />
         ) : showLighterNoSof ? (
-          <Card className="w-full">
-            <CardContent className="space-y-3 py-8 text-center text-sm">
-              <p className="text-muted-foreground">
-                No lighter SOF exists for this hull yet. Create one to use {sectionTitle.toLowerCase()}.
-              </p>
-              <Button asChild variant="secondary">
-                <Link href="/vessel-calls">New vessel call</Link>
-              </Button>
-            </CardContent>
-          </Card>
+          <VesselSofAddEventEmptyState
+            kind="lighter"
+            vesselCallId=""
+            lighterCallId={lighterCallId}
+            pathname={pathname}
+            sectionLabel={sectionTitle}
+          />
         ) : showLighterDisambig ? (
           <p className="text-center text-sm text-muted-foreground">
             Choose a statement of facts in the list above.

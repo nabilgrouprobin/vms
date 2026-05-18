@@ -22,6 +22,7 @@ import { SofLaytimePersistBar } from "@/components/sof/sof-laytime-persist-bar";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
 import { useUserProfile } from "@/components/providers/auth-provider";
 import { useAutoLoadAllPages } from "@/hooks/use-auto-load-all-pages";
+import { useSofAddEventFromQuery } from "@/hooks/use-sof-add-event-from-query";
 import { useSofLaytimeRecalculate } from "@/hooks/use-sof-laytime-recalculate";
 import { LaytimeSnapshotToolbar } from "@/components/sof/laytime-snapshot-toolbar";
 
@@ -104,6 +105,8 @@ type MotherSofDetail = {
   laytimeBalanceHours: string | null;
   laytimeCommenceAt: string | null;
   laytimePartialCargoMt: string | null;
+  laytimeMinimumAllowedHours: string | null;
+  laytimeGraceHours: string | null;
   laytimeDischargeRateMtPerDay: string | null;
   laytimeExcludedTimePeriod: string | null;
   laytimeExcludedDays: string[];
@@ -336,6 +339,8 @@ export function MotherSofDetailView({
     setEvStartTime(toLocalDtInput(matchingGap.fromIso));
     setAddEventOpen(true);
   };
+
+  useSofAddEventFromQuery(Boolean(sof && eventTypesQ.data?.length), () => openAddEvent());
 
   const weekPayloadRef = useRef<LaytimeWeekPayloadGetter | null>(null);
   const registerWeekPayload = useCallback((getter: LaytimeWeekPayloadGetter | null) => {
@@ -697,6 +702,8 @@ export function MotherSofDetailView({
         vesselCall={sof.vesselCall}
         sofUpdatedAt={sof.updatedAt}
         laytimePartialCargoMt={sof.laytimePartialCargoMt}
+        laytimeMinimumAllowedHours={sof.laytimeMinimumAllowedHours}
+        laytimeGraceHours={sof.laytimeGraceHours}
         laytimeHolidays={sof.laytimeHolidays}
         cargo={laytimeCargoAllowance}
         week={laytimeWeekWindow}
@@ -791,6 +798,8 @@ export function MotherSofDetailView({
         breakdown={layRecalc.breakdown}
         chronology={layRecalc.chronology}
         portStatement={motherLaytimePortStatement}
+        laytimeMinimumAllowedHours={sof.laytimeMinimumAllowedHours}
+        laytimeGraceHours={sof.laytimeGraceHours}
       />
                   ) : (
       <p className="text-[11px] text-muted-foreground">
@@ -928,6 +937,8 @@ export function MotherSofDetailView({
                       sofNo={sof.sofNo}
                       breakdown={layRecalc?.breakdown ?? null}
                       timesheet={layRecalc?.timesheet ?? null}
+                      dailyLedger={displayDailyLedger ?? layRecalc?.dailyLedger ?? null}
+                      chronology={layRecalc?.chronology ?? []}
                       portStatement={motherLaytimePortStatement ?? null}
                       compact
                       recalculateDisabled={layRecalcPending || sof.status === "CLOSED"}
@@ -970,6 +981,8 @@ export function MotherSofDetailView({
                       sofNo={sof.sofNo}
                       breakdown={layRecalc?.breakdown ?? null}
                       timesheet={layRecalc?.timesheet ?? null}
+                      dailyLedger={displayDailyLedger ?? layRecalc?.dailyLedger ?? null}
+                      chronology={layRecalc?.chronology ?? []}
                       portStatement={motherLaytimePortStatement ?? null}
                       showCopySummary={false}
                     />
@@ -1103,6 +1116,8 @@ export function MotherSofDetailView({
                     sofNo={sof.sofNo}
                     breakdown={layRecalc?.breakdown ?? null}
                     timesheet={layRecalc?.timesheet ?? null}
+                    dailyLedger={displayDailyLedger ?? layRecalc?.dailyLedger ?? null}
+                    chronology={layRecalc?.chronology ?? []}
                     portStatement={motherLaytimePortStatement ?? null}
                   />
                   {laytimeSnapshot ? (

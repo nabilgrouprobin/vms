@@ -13,7 +13,9 @@ import {
 } from "@/lib/laytime-hours-format";
 import type {
   LaytimeBreakdown,
+  LaytimeChronologyRow,
   LaytimePortStatementContext,
+  MotherLaytimeDailyLedger,
   MotherLaytimeTimesheet
 } from "@/lib/sof-api";
 import { cn } from "@/lib/utils";
@@ -44,6 +46,8 @@ export type LaytimeCalculationResultsPanelProps = {
   sofNo: string;
   breakdown: LaytimeBreakdown | null;
   timesheet: MotherLaytimeTimesheet | null;
+  dailyLedger?: MotherLaytimeDailyLedger | null;
+  chronology?: LaytimeChronologyRow[];
   portStatement?: LaytimePortStatementContext | null;
   /** Workspace laytime: hide duplicate vessel title and header action row. */
   compact?: boolean;
@@ -57,6 +61,8 @@ export function LaytimeCalculationResultsPanel({
   sofNo,
   breakdown,
   timesheet,
+  dailyLedger,
+  chronology = [],
   portStatement,
   compact = false,
   recalculateDisabled,
@@ -289,6 +295,8 @@ export function LaytimeCalculationResultsPanel({
             sofNo={sofNo}
             breakdown={breakdown}
             timesheet={timesheet}
+            dailyLedger={dailyLedger}
+            chronology={chronology}
             portStatement={portStatement}
           />
         ) : null}

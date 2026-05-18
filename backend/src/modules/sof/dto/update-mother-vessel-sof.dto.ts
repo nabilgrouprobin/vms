@@ -42,6 +42,14 @@ export class UpdateMotherVesselSofDto {
   @Allow()
   laytimeDischargeRateMtPerDay?: string | number | null;
 
+  /** Minimum allowed laytime (hours) for laytime summary; null clears. */
+  @Allow()
+  laytimeMinimumAllowedHours?: string | number | null;
+
+  /** Grace time (hours) before demurrage in laytime summary; null clears. */
+  @Allow()
+  laytimeGraceHours?: string | number | null;
+
   /** Working week marker line for laytime calendar; null clears. */
   @IsOptional()
   @IsString()

@@ -18,6 +18,7 @@ import type {
   MotherLaytimeDailyLedger,
   MotherLaytimeTimesheet
 } from "@/lib/sof-api";
+import { LaytimeSummaryTable } from "@/components/sof/laytime-summary-table";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatGmtOffsetForZone } from "@/lib/timezone-gmt";
@@ -167,7 +168,9 @@ export function MotherLaytimeTimesheetTable({
   chronology = [],
   portStatement = null,
   className,
-  sheetLayout = "priority"
+  sheetLayout = "priority",
+  laytimeMinimumAllowedHours,
+  laytimeGraceHours
 }: {
   dailyLedger: MotherLaytimeDailyLedger;
   timesheet: MotherLaytimeTimesheet;
@@ -179,6 +182,8 @@ export function MotherLaytimeTimesheetTable({
   className?: string;
   /** priority: daily + event tables first; supporting text in a collapsible. */
   sheetLayout?: MotherLaytimeTimesheetLayout;
+  laytimeMinimumAllowedHours?: number | string | null;
+  laytimeGraceHours?: number | string | null;
 }) {
   const c = timesheet.contractSummary;
   const freeH = breakdown.allowedHours;
@@ -976,9 +981,19 @@ export function MotherLaytimeTimesheetTable({
     </div>
   );
 
+  const summaryTable = (
+    <LaytimeSummaryTable
+      breakdown={breakdown}
+      contract={c}
+      minimumAllowedHours={laytimeMinimumAllowedHours}
+      graceHours={laytimeGraceHours}
+    />
+  );
+
   return (
     <section id="laytime-worksheet" className={cn("scroll-mt-20 space-y-2", className)}>
       {dailyTable}
+      {summaryTable}
     </section>
   );
 }

@@ -46,7 +46,8 @@ export type LoginResponseSchema = z.infer<typeof loginResponseSchema>;
 
 const vesselCallChipSchema = z
   .object({
-    vessel: z.object({ name: z.string() }),
+    id: z.string().optional(),
+    vessel: z.object({ id: z.string().optional(), name: z.string() }),
     callNo: z.string()
   })
   .nullable();
@@ -60,7 +61,9 @@ export const lighterSofChipPeekSchema = z.object({
   sofNo: z.string(),
   lighterTrip: z
     .object({
-      lighterVessel: z.object({ name: z.string() }),
+      id: z.string().optional(),
+      lighterPortCallId: z.string().nullable().optional(),
+      lighterVessel: z.object({ id: z.string().optional(), name: z.string() }),
       tripNo: z.string(),
       vesselCall: vesselCallChipSchema
     })

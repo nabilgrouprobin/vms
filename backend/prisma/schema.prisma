@@ -2758,6 +2758,10 @@ model StatementOfFacts {
   laytimePartialCargoMt Decimal?  @map("laytime_partial_cargo_mt") @db.Decimal(18, 3)
   /// Discharge rate (MT/day) on this SOF when contract rate is not used
   laytimeDischargeRateMtPerDay Decimal? @map("laytime_discharge_rate_mt_per_day") @db.Decimal(18, 2)
+  /// Minimum allowed laytime (hours) for summary / claim (decimal hours)
+  laytimeMinimumAllowedHours Decimal? @map("laytime_minimum_allowed_hours") @db.Decimal(12, 2)
+  /// Grace time deducted before demurrage (hours)
+  laytimeGraceHours          Decimal? @map("laytime_grace_hours") @db.Decimal(12, 2)
   /// Manual working week marker + notes for laytime (overrides import contract when set)
   laytimeExcludedTimePeriod String?  @map("laytime_excluded_time_period")
   laytimeExcludedDays       String[] @default([]) @map("laytime_excluded_days")

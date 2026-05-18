@@ -18,6 +18,7 @@ import { SofLaytimePersistBar } from "@/components/sof/sof-laytime-persist-bar";
 import { SofDetailTabStrip } from "@/components/sof/detail/sof-detail-tab-strip";
 import { useUserProfile } from "@/components/providers/auth-provider";
 import { useAutoLoadAllPages } from "@/hooks/use-auto-load-all-pages";
+import { useSofAddEventFromQuery } from "@/hooks/use-sof-add-event-from-query";
 import { useSofLaytimeRecalculate } from "@/hooks/use-sof-laytime-recalculate";
 import {
   ImportContractLaytimeForm,
@@ -32,6 +33,7 @@ import {
 import { LaytimeCalculationResultsPanel } from "@/components/sof/laytime-calculation-results-panel";
 import { MotherLaytimeTimesheetTable } from "@/components/sof/mother-laytime-timesheet-table";
 import { SofLaytimeStatementParamsCard } from "@/components/sof/sof-laytime-statement-params-card";
+import { SofLaytimeSummaryParamsCard } from "@/components/sof/sof-laytime-summary-params-card";
 import { SofEventsVesselLaytimeSetupCard } from "@/components/sof/sof-events-vessel-laytime-setup-card";
 import {
   SofLaytimeSetupSidebarCard,
@@ -95,6 +97,8 @@ type LighterSofDetail = {
   laytimeBalanceHours: string | null;
   laytimeCommenceAt: string | null;
   laytimePartialCargoMt: string | null;
+  laytimeMinimumAllowedHours: string | null;
+  laytimeGraceHours: string | null;
   laytimeDischargeRateMtPerDay: string | null;
   laytimeExcludedTimePeriod: string | null;
   laytimeExcludedDays: string[];
@@ -318,6 +322,11 @@ export function LighterSofDetailView({
     setEvStartTime(toLocalDtInput(matchingGap.fromIso));
     setAddEventOpen(true);
   };
+
+  useSofAddEventFromQuery(
+    Boolean(sof && eventTypesQ.data?.length),
+    () => openAddEvent()
+  );
 
   const weekPayloadRef = useRef<LaytimeWeekPayloadGetter | null>(null);
   const registerWeekPayload = useCallback((getter: LaytimeWeekPayloadGetter | null) => {
@@ -572,6 +581,8 @@ export function LighterSofDetailView({
         breakdown={layRecalc.breakdown}
         chronology={layRecalc.chronology}
         portStatement={lighterLaytimePortStatement}
+        laytimeMinimumAllowedHours={sof.laytimeMinimumAllowedHours}
+        laytimeGraceHours={sof.laytimeGraceHours}
       />
     ) : (
       <p className="text-[11px] text-muted-foreground">
@@ -774,6 +785,8 @@ export function LighterSofDetailView({
                     sofNo={sof.sofNo}
                     breakdown={layRecalc?.breakdown ?? null}
                     timesheet={layRecalc?.timesheet ?? null}
+                    dailyLedger={layRecalc?.dailyLedger ?? null}
+                    chronology={layRecalc?.chronology ?? []}
                     portStatement={lighterLaytimePortStatement ?? null}
                   />
 
@@ -882,6 +895,15 @@ export function LighterSofDetailView({
                       patchSof={(body) => updateLighterSof(id, body)}
                       invalidateQueryKeys={[["lighter-sof", id]]}
                       showPartialCargo={false}
+                    />
+
+                    <SofLaytimeSummaryParamsCard
+                      readOnly={sof.status === "CLOSED"}
+                      serverSyncToken={sof.updatedAt}
+                      laytimeMinimumAllowedHours={sof.laytimeMinimumAllowedHours}
+                      laytimeGraceHours={sof.laytimeGraceHours}
+                      patchSof={(body) => updateLighterSof(id, body)}
+                      invalidateQueryKeys={[["lighter-sof", id]]}
                     />
 
                     <Card className="shadow-sm xl:shadow-none">

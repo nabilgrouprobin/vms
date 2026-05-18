@@ -9,11 +9,14 @@ import {
   formatDecimalHoursToHMin,
   formatDecimalHoursToTotalHoursMin
 } from "@/lib/laytime-hours-format";
+import { downloadLaytimeCalculationCsv } from "@/lib/laytime-csv-export";
 import { runLaytimeBundlePrint } from "@/lib/laytime-print";
 import { toast } from "@/lib/toast";
 import type {
   LaytimeBreakdown,
+  LaytimeChronologyRow,
   LaytimePortStatementContext,
+  MotherLaytimeDailyLedger,
   MotherLaytimeTimesheet
 } from "@/lib/sof-api";
 import { cn } from "@/lib/utils";
@@ -34,6 +37,8 @@ export type LaytimeResultsActionsProps = {
   sofNo: string;
   breakdown: LaytimeBreakdown | null;
   timesheet: MotherLaytimeTimesheet | null;
+  dailyLedger?: MotherLaytimeDailyLedger | null;
+  chronology?: LaytimeChronologyRow[];
   portStatement?: LaytimePortStatementContext | null;
   showCopySummary?: boolean;
   className?: string;
@@ -43,6 +48,8 @@ export function LaytimeResultsActions({
   sofNo,
   breakdown,
   timesheet,
+  dailyLedger,
+  chronology = [],
   portStatement,
   showCopySummary = true,
   className
@@ -80,34 +87,24 @@ export function LaytimeResultsActions({
     return lines.filter(Boolean).join("\n");
   }, [breakdown, c, portStatement?.vesselName, primaryAmountLine, sofNo]);
 
+  const canExportFull =
+    breakdown != null && timesheet != null && (dailyLedger?.rows?.length ?? 0) > 0;
+
   const downloadCsv = useCallback(() => {
-    if (!breakdown || !c) return;
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const rows: string[][] = [
-      ["Field", "Value"],
-      ["SOF", sofNo],
-      ["Vessel", portStatement?.vesselName ?? ""],
-      ["Laytime commence (UTC)", breakdown.commenceAt],
-      ["Allowed hours", breakdown.allowedHours != null ? String(breakdown.allowedHours) : ""],
-      ["Used hours", String(breakdown.usedHours)],
-      ["Excluded hours", String(breakdown.excludedHours)],
-      ["Demurrage hours", String(breakdown.demurrageHours)],
-      ["Dispatch hours", String(breakdown.dispatchHours)],
-      ["Demurrage amount", breakdown.demurrageAmount != null ? String(breakdown.demurrageAmount) : ""],
-      ["Dispatch amount", breakdown.dispatchAmount != null ? String(breakdown.dispatchAmount) : ""],
-      ["Net amount", breakdown.netAmount != null ? String(breakdown.netAmount) : ""],
-      ["Currency", breakdown.currency ?? c.currency ?? ""]
-    ];
-    const body = rows.map((r) => r.map(esc).join(",")).join("\n");
-    const blob = new Blob([body], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${sofNo}-laytime-summary.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Laytime summary CSV downloaded.");
-  }, [breakdown, c, portStatement?.vesselName, sofNo]);
+    if (!breakdown || !timesheet || !dailyLedger?.rows?.length) {
+      toast.error("Recalculate laytime first to export the daily calculation table.");
+      return;
+    }
+    downloadLaytimeCalculationCsv({
+      sofNo,
+      breakdown,
+      timesheet,
+      dailyLedger,
+      portStatement: portStatement ?? undefined,
+      chronology
+    });
+    toast.success("Laytime calculation CSV downloaded (summary + daily table + segments).");
+  }, [breakdown, chronology, dailyLedger, portStatement, sofNo, timesheet]);
 
   const copySummary = useCallback(async () => {
     if (!summaryText) return;
@@ -143,6 +140,12 @@ export function LaytimeResultsActions({
         variant="outline"
         size="sm"
         className="h-7 gap-1 px-2 text-[11px]"
+        disabled={!canExportFull}
+        title={
+          canExportFull
+            ? "Download summary, daily calculation table, SOF segments, and chronology"
+            : "Run Recalculate to generate the daily table first"
+        }
         onClick={downloadCsv}
       >
         <Download className="size-3.5" aria-hidden />

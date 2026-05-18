@@ -32,6 +32,10 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { RecalculateLaytimeDto } from "./dto/recalculate-laytime.dto";
 import { LaytimeCalculationService } from "./laytime/laytime-calculation.service";
 import {
+  loadSofLaytimeSummaryFields,
+  persistSofLaytimeSummaryFields
+} from "./laytime/sof-laytime-summary.persistence";
+import {
   loadSofLaytimeWeekFields,
   persistSofLaytimeWeekFields
 } from "./laytime/sof-laytime-week.persistence";
@@ -97,8 +101,11 @@ export class SofService {
       throw new NotFoundException("Mother vessel SOF was not found");
     }
 
-    const week = await loadSofLaytimeWeekFields(this.prisma, id);
-    return { ...sof, ...week };
+    const [week, summary] = await Promise.all([
+      loadSofLaytimeWeekFields(this.prisma, id),
+      loadSofLaytimeSummaryFields(this.prisma, id)
+    ]);
+    return { ...sof, ...week, ...summary };
   }
 
   async getSofOptions() {
@@ -163,26 +170,38 @@ export class SofService {
 
     const weekPeriod = dto.laytimeExcludedTimePeriod;
     const weekDays = dto.laytimeExcludedDays;
+    const summaryMin = dto.laytimeMinimumAllowedHours;
+    const summaryGrace = dto.laytimeGraceHours;
     const base = this.removeUndefined(
       this.buildSofUpdateData({
         ...dto,
         laytimeExcludedTimePeriod: undefined,
-        laytimeExcludedDays: undefined
+        laytimeExcludedDays: undefined,
+        laytimeMinimumAllowedHours: undefined,
+        laytimeGraceHours: undefined
       })
     );
 
-    const applyWeekFields = async () => {
+    const applyExtraLaytimeFields = async () => {
       if (weekPeriod !== undefined || weekDays !== undefined) {
         await persistSofLaytimeWeekFields(this.prisma, id, {
           laytimeExcludedTimePeriod: weekPeriod,
           laytimeExcludedDays: weekDays
         });
       }
+      if (summaryMin !== undefined || summaryGrace !== undefined) {
+        await persistSofLaytimeSummaryFields(this.prisma, id, {
+          laytimeMinimumAllowedHours:
+            summaryMin !== undefined ? this.toNullableDecimal(summaryMin) : undefined,
+          laytimeGraceHours:
+            summaryGrace !== undefined ? this.toNullableDecimal(summaryGrace) : undefined
+        });
+      }
     };
 
     if (dto.laytimeHolidays === undefined) {
       await this.sofRepository.updateMotherVesselSof(id, base);
-      await applyWeekFields();
+      await applyExtraLaytimeFields();
       return this.getMotherVesselSof(id);
     }
 
@@ -204,7 +223,7 @@ export class SofService {
       await tx.statementOfFacts.update({ where: { id }, data: base });
     });
 
-    await applyWeekFields();
+    await applyExtraLaytimeFields();
     return this.getMotherVesselSof(id);
   }
 
@@ -275,8 +294,11 @@ export class SofService {
       throw new NotFoundException("Lighter vessel SOF was not found");
     }
 
-    const week = await loadSofLaytimeWeekFields(this.prisma, id);
-    return { ...sof, ...week };
+    const [week, summary] = await Promise.all([
+      loadSofLaytimeWeekFields(this.prisma, id),
+      loadSofLaytimeSummaryFields(this.prisma, id)
+    ]);
+    return { ...sof, ...week, ...summary };
   }
 
   async createLighterVesselSof(dto: CreateLighterVesselSofDto) {
@@ -328,26 +350,38 @@ export class SofService {
 
     const weekPeriod = dto.laytimeExcludedTimePeriod;
     const weekDays = dto.laytimeExcludedDays;
+    const summaryMin = dto.laytimeMinimumAllowedHours;
+    const summaryGrace = dto.laytimeGraceHours;
     const base = this.removeUndefined(
       this.buildSofUpdateData({
         ...dto,
         laytimeExcludedTimePeriod: undefined,
-        laytimeExcludedDays: undefined
+        laytimeExcludedDays: undefined,
+        laytimeMinimumAllowedHours: undefined,
+        laytimeGraceHours: undefined
       })
     );
 
-    const applyWeekFields = async () => {
+    const applyExtraLaytimeFields = async () => {
       if (weekPeriod !== undefined || weekDays !== undefined) {
         await persistSofLaytimeWeekFields(this.prisma, id, {
           laytimeExcludedTimePeriod: weekPeriod,
           laytimeExcludedDays: weekDays
         });
       }
+      if (summaryMin !== undefined || summaryGrace !== undefined) {
+        await persistSofLaytimeSummaryFields(this.prisma, id, {
+          laytimeMinimumAllowedHours:
+            summaryMin !== undefined ? this.toNullableDecimal(summaryMin) : undefined,
+          laytimeGraceHours:
+            summaryGrace !== undefined ? this.toNullableDecimal(summaryGrace) : undefined
+        });
+      }
     };
 
     if (dto.laytimeHolidays === undefined) {
       await this.sofRepository.updateLighterVesselSof(id, base);
-      await applyWeekFields();
+      await applyExtraLaytimeFields();
       return this.getLighterVesselSof(id);
     }
 
@@ -369,7 +403,7 @@ export class SofService {
       await tx.statementOfFacts.update({ where: { id }, data: base });
     });
 
-    await applyWeekFields();
+    await applyExtraLaytimeFields();
     return this.getLighterVesselSof(id);
   }
 

@@ -40,6 +40,12 @@ export class UpdateLighterVesselSofDto {
   @Allow()
   laytimeDischargeRateMtPerDay?: string | number | null;
 
+  @Allow()
+  laytimeMinimumAllowedHours?: string | number | null;
+
+  @Allow()
+  laytimeGraceHours?: string | number | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(4000)

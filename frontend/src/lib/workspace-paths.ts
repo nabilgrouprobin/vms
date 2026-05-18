@@ -70,7 +70,35 @@ export type VesselSofWorkspaceQuery = {
   lighterVesselId?: string | null;
   /** When set (e.g. after “Change SOF”), skip auto-selecting the only SOF so the user can choose another. */
   pickSof?: string | null;
+  /** Open add-event sheet once after navigation (stripped immediately after). */
+  addEvent?: string | null;
 };
+
+/**
+ * Build a fresh workspace URL (no merge with stale search params).
+ * Use when switching vessel or SOF so a previous `?id=` cannot leak through.
+ */
+export function buildVesselSofWorkspaceUrl(
+  pathname: string,
+  params: VesselSofWorkspaceQuery & { kind: "mother" | "lighter" }
+): string {
+  const sp = new URLSearchParams();
+  sp.set("kind", params.kind);
+  const sid = params.id?.trim();
+  const vc = params.vesselCallId?.trim();
+  const lc = params.lighterCallId?.trim();
+  const lv = params.lighterVesselId?.trim();
+  const pick = params.pickSof?.trim();
+  const addEvent = params.addEvent?.trim();
+  if (sid) sp.set("id", sid);
+  if (vc) sp.set("vesselCallId", vc);
+  if (lc) sp.set("lighterCallId", lc);
+  if (lv) sp.set("lighterVesselId", lv);
+  if (pick) sp.set("pickSof", pick);
+  if (addEvent) sp.set("addEvent", addEvent);
+  const q = sp.toString();
+  return q ? `${pathname}?${q}` : pathname;
+}
 
 export function vesselSofWorkspacePath(
   section: VesselSofWorkspaceSection,
